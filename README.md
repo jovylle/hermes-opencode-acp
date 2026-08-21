@@ -1,96 +1,113 @@
+---
+name: hermes-opencode-acp
+description: OpenCode ACP provider for Hermes Agent — use OpenCode as a coding agent backend
+---
+
 # hermes-opencode-acp
 
-OpenCode ACP provider for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — lets Hermes use [OpenCode](https://opencode.ai) as a coding agent backend via the Agent Client Protocol (ACP).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## What it does
+Use [OpenCode](https://opencode.ai) as a coding agent backend for [Hermes Agent](https://github.com/NousResearch/hermes-agent) via the Agent Client Protocol (ACP).
 
-Hermes spawns `opencode acp` as a subprocess and communicates via JSON-RPC 2.0 over stdio (ACP v1). OpenCode handles model selection, tool use, and plugin fallbacks — Hermes drives the ACP wire.
+Connects Hermes to OpenCode via JSON-RPC over stdio. OpenCode handles model selection, tool use, and plugin fallbacks — Hermes drives the ACP wire.
 
-```
-Hermes                         OpenCode
-  │                               │
-  │── spawn: opencode acp ──────>│
-  │<── JSON-RPC initialize ──────│  handshake
-  │<── session/new ──────────────│  create session
-  │<── session/prompt ───────────│  send conversation
-  │   agent_thought_chunk ...     │  streaming reasoning
-  │   agent_message_chunk ...     │  streaming text
-  │<── stopReason: end_turn ────│
-  │── OpenAI-compatible ─────────│  return to Hermes
-  │   completion object           │
-```
+## Features
 
-### Persistent sessions
+- **200+ models** — access OpenCode's full catalog (Anthropic, OpenAI, Google, DeepSeek, etc.) without managing API keys individually
+- **Full ACP protocol** — initialize, streaming, token estimation, model negotiation
+- **Persistent sessions** — one OpenCode process per model, reused across turns (no respawn overhead)
 
-Unlike the default per-turn spawn, this implementation keeps the ACP process alive across turns. Same model = same process, same session context. Turn 2+ are ~60% faster.
+## Use Cases
 
-### Dynamic model picker
+**1. Access OpenCode's full model catalog**
 
-`hermes fallback add` → pick `opencode-acp` → queries `opencode models` → shows all available models in an interactive picker.
+OpenCode has 200+ models across dozens of providers with built-in auth. No need to manage API keys individually — OpenCode handles it.
 
-## Prerequisites
+**2. Use OpenCode's agentic loop as a provider**
 
-- **Hermes Agent** (with ACP support)
-- **OpenCode CLI** installed:
-  ```bash
-  npm i -g opencode-ai@latest
-  # or
-  brew install anomalyco/tap/opencode
-  ```
-- **OpenCode auth**: `opencode auth login` or set provider env vars
-- **Verify**: `opencode run 'hello'` works standalone
+OpenCode has its own tool use, plugin fallbacks, and context management. When Hermes delegates to OpenCode via ACP, it gets all of that for free.
 
-## Install
+**3. Model flexibility without config sprawl**
 
-### 1. Copy the ACP client into Hermes
+Pick any model from OpenCode's catalog as your Hermes model or fallback. `hermes fallback add` now shows the full list — no more guessing model IDs.
+
+**4. Free tier via OpenCode Go**
+
+OpenCode offers free credits for certain models. Run Hermes with free models via OpenCode's Go tier, then fall back to paid when exhausted.
+
+**5. Fallback chain integration**
+
+OpenCode ACP models work in Hermes's fallback chain. If your primary model is rate-limited, try OpenCode models before going to other providers.
+
+## Quick Start
+
+### 1. Install OpenCode CLI
 
 ```bash
-# Copy the ACP client
-cp opencode_acp_client.py ~/.hermes/hermes-agent/agent/
+# macOS
+brew install anomalyco/tap/opencode
 
-# Copy the provider plugin
+# npm
+npm i -g opencode-ai@latest
+
+# Verify
+opencode run 'hello'
+```
+
+### 2. Set up OpenCode auth
+
+```bash
+opencode auth login
+# or set provider env vars (OPENROUTER_API_KEY, etc.)
+```
+
+### 3. Install the plugin
+
+```bash
+# Clone
+git clone https://github.com/jovylle/hermes-opencode-acp.git
+cd hermes-opencode-acp
+
+# Copy plugin
+cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
 mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
-cp opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
-```
+cp plugin/opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
 
-### 2. Apply core patches
-
-These patch Hermes core files to recognize `opencode-acp` as a provider:
-
-```bash
+# Apply patches
 cd ~/.hermes/hermes-agent
-
-# Apply each patch
-git apply patches/001-auth-opencode-acp-status.patch
-git apply patches/002-model-picker-dynamic.patch
-git apply patches/003-runtime-helpers-acp.patch
-git apply patches/004-auxiliary-client-acp.patch
+git apply /path/to/hermes-opencode-acp/patches/*.patch
 ```
 
-### 3. Restart Hermes
+### 4. Configure
 
 ```bash
-# Restart the gateway
-hermes gateway restart
+# Interactive — shows 200+ models from OpenCode
+hermes model
+# Pick: OpenCode → OpenCode ACP → select model
+
+# Add to fallback chain
+hermes fallback add
+# Pick: OpenCode ACP → pick a model
 ```
 
-## Configure
+### 5. Restart and use
 
-### Set as primary model
+```bash
+hermes gateway restart
+hermes chat  # works!
+```
+
+## Configuration
+
+### Via `hermes model`
 
 ```bash
 hermes model
-# Pick "OpenCode" → "OpenCode ACP" → pick a model
+# Select: OpenCode → OpenCode ACP
+# Shows 200+ models from OpenCode's catalog
 ```
 
-### Add as fallback
-
-```bash
-hermes fallback add
-# Pick "OpenCode ACP" → pick a model
-```
-
-### Manual config.yaml
+### Via `config.yaml`
 
 ```yaml
 model:
@@ -98,56 +115,37 @@ model:
   model: opencode/deepseek-v4-flash
   base_url: acp://opencode
   api_mode: chat_completions
+```
 
+### Via environment variables
+
+```bash
+export OPENCODE_BIN=/path/to/opencode
+export HERMES_OPENCODE_ACP_COMMAND=/path/to/opencode
+export HERMES_OPENCODE_ACP_ARGS="acp"
+export OPENCODE_ACP_BASE_URL="acp://opencode"
+```
+
+### Fallback chain
+
+```yaml
 fallback_providers:
+  - provider: opencode-acp
+    model: opencode/mimo-v2.5-free
+    base_url: acp://opencode
   - provider: opencode-acp
     model: opencode/kimi-k2.6
     base_url: acp://opencode
 ```
 
-### Environment variables
-
-```bash
-# Override the OpenCode binary path
-export OPENCODE_BIN=/path/to/opencode
-# or
-export HERMES_OPENCODE_ACP_COMMAND=/path/to/opencode
-
-# Override ACP args
-export HERMES_OPENCODE_ACP_ARGS="acp"
-```
-
-## How it works
-
-### Architecture
+## Architecture
 
 ```
-Hermes Session
-  └─ OpenCodeACPClient (cached by model+cwd)
-       └─ ONE opencode subprocess (persistent)
-            └─ ONE ACP session (ses_xxx)
-                 ├─ Turn 1: full transcript (system + user)
-                 ├─ Turn 2: incremental (just latest message)
-                 └─ Turn 3: incremental (just latest message)
+Hermes ──ACP JSON-RPC──> OpenCode ──HTTP──> LLM Provider
+  │                          │
+  │ persistent process       │ model selection + tools
+  │ streaming response       │ plugin fallbacks
 ```
-
-### Key features
-
-- **Persistent sessions**: Process stays alive across turns. Same model reuses the same process.
-- **Model selection**: `OPENCODE_MODEL` env var tells OpenCode which model to use. Dynamic model picker via `opencode models`.
-- **Fallback chain**: Each model gets its own cached client. Same model = reuse. Different model = fresh process.
-- **Crash recovery**: If the process dies, next turn spawns a fresh one automatically.
-
-### Files
-
-| File | Purpose |
-|------|---------|
-| `opencode_acp_client.py` | ACP client — handles subprocess lifecycle, JSON-RPC, streaming |
-| `opencode_acp_provider.py` | Provider profile — registers `opencode-acp` in Hermes provider registry |
-| `patches/001-*.patch` | Auth status resolution for opencode-acp |
-| `patches/002-*.patch` | Dynamic model picker via `opencode models` |
-| `patches/003-*.patch` | Runtime helpers — use cached ACP client |
-| `patches/004-*.patch` | Auxiliary client — resolve opencode-acp provider |
 
 ## Differences from Copilot ACP
 
@@ -159,7 +157,7 @@ Hermes Session
 | Base URL marker | `acp://copilot` | `acp://opencode` |
 | Auth | Copilot CLI login | OpenCode auth |
 | Model selection | GitHub Copilot catalog | OpenCode's config |
-| Models available | ~10 | 225+ |
+| Session persistence | Per-turn (new process) | Persistent (same process) |
 
 ## Troubleshooting
 
@@ -167,18 +165,17 @@ Hermes Session
 - Install OpenCode: `npm i -g opencode-ai@latest`
 - Or set `OPENCODE_BIN=/full/path/to/opencode`
 
-**ACP session times out on first turn**
-- The `session/new` response can be large (60K+ chars with all model options)
-- First turn may take 15-25s; subsequent turns are 5-10s
+**OpenCode ACP exits immediately**
+- Check `opencode run 'hello'` works standalone
+- Check OpenCode auth: `opencode providers`
 
-**Model not changing**
-- Check `OPENCODE_MODEL` is set: `echo $OPENCODE_MODEL`
-- Verify OpenCode sees the model: `opencode models | grep your-model`
+**No streaming text**
+- The model may not support streaming via ACP
+- Try a different model in OpenCode's config
 
-**Process crashes mid-conversation**
-- Context is lost (unavoidable — process died)
-- Next turn auto-spawns a fresh process
-- Check OpenCode logs: `opencode run 'hello'`
+**Model list not showing**
+- Run `opencode models` directly to verify OpenCode CLI works
+- If empty, check OpenCode auth with `opencode providers`
 
 ## License
 
