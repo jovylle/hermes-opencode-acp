@@ -1,0 +1,101 @@
+diff --git a/hermes_cli/auth.py b/hermes_cli/auth.py
+index 666ef4150..03f7dc593 100644
+--- a/hermes_cli/auth.py
++++ b/hermes_cli/auth.py
+@@ -305,6 +305,13 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
+         inference_base_url=DEFAULT_COPILOT_ACP_BASE_URL,
+         base_url_env_var="COPILOT_ACP_BASE_URL",
+     ),
++    "opencode-acp": ProviderConfig(
++        id="opencode-acp",
++        name="OpenCode ACP",
++        auth_type="external_process",
++        inference_base_url="acp://opencode",
++        base_url_env_var="OPENCODE_ACP_BASE_URL",
++    ),
+     "gemini": ProviderConfig(
+         id="gemini",
+         name="Google AI Studio",
+@@ -2110,6 +2117,7 @@ def resolve_provider(
+         "github": "copilot", "github-copilot": "copilot",
+         "github-models": "copilot", "github-model": "copilot",
+         "github-copilot-acp": "copilot-acp", "copilot-acp-agent": "copilot-acp",
++        "opencode-acp-agent": "opencode-acp", "oc-acp": "opencode-acp",
+         "aigateway": "ai-gateway", "vercel": "ai-gateway", "vercel-ai-gateway": "ai-gateway",
+         "opencode": "opencode-zen", "zen": "opencode-zen",
+         "qwen-portal": "qwen-oauth", "qwen-cli": "qwen-oauth", "qwen-oauth": "qwen-oauth",
+@@ -7123,13 +7131,25 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
+     if not pconfig or pconfig.auth_type != "external_process":
+         return {"configured": False}
+ 
+-    command = (
+-        os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+-        or os.getenv("COPILOT_CLI_PATH", "").strip()
+-        or "copilot"
+-    )
+-    raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
+-    args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
++    if provider_id == "copilot-acp":
++        command = (
++            os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
++            or os.getenv("COPILOT_CLI_PATH", "").strip()
++            or "copilot"
++        )
++        raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
++        args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
++    elif provider_id == "opencode-acp":
++        command = (
++            os.getenv("HERMES_OPENCODE_ACP_COMMAND", "").strip()
++            or os.getenv("OPENCODE_BIN", "").strip()
++            or "opencode"
++        )
++        raw_args = os.getenv("HERMES_OPENCODE_ACP_ARGS", "").strip()
++        args = shlex.split(raw_args) if raw_args else ["acp", "--stdio"]
++    else:
++        command = "unknown"
++        args = []
+     base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
+     if not base_url:
+         base_url = pconfig.inference_base_url
+@@ -7166,6 +7186,8 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
+         return get_minimax_oauth_auth_status()
+     if target == "copilot-acp":
+         return get_external_process_provider_status(target)
++    if target == "opencode-acp":
++        return get_external_process_provider_status(target)
+     if target == "azure-foundry":
+         return _get_azure_foundry_auth_status()
+     # API-key providers
+@@ -7354,6 +7376,32 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
+     if not base_url:
+         base_url = pconfig.inference_base_url
+ 
++    if provider_id == "opencode-acp":
++        command = (
++            os.getenv("HERMES_OPENCODE_ACP_COMMAND", "").strip()
++            or os.getenv("OPENCODE_BIN", "").strip()
++            or "opencode"
++        )
++        raw_args = os.getenv("HERMES_OPENCODE_ACP_ARGS", "").strip()
++        args = shlex.split(raw_args) if raw_args else ["acp"]
++        resolved_command = shutil.which(command) if command else None
++        if not resolved_command:
++            raise AuthError(
++                f"Could not find the OpenCode CLI command '{command}'. "
++                "Install OpenCode CLI or set HERMES_OPENCODE_ACP_COMMAND/OPENCODE_BIN.",
++                provider=provider_id,
++                code="missing_opencode_cli",
++            )
++        return {
++            "provider": provider_id,
++            "api_key": "opencode-acp",
++            "base_url": base_url.rstrip("/"),
++            "command": resolved_command or command,
++            "args": args,
++            "source": "process",
++        }
++
++    # copilot-acp (default for external_process)
+     command = (
+         os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+         or os.getenv("COPILOT_CLI_PATH", "").strip()

@@ -1,0 +1,32 @@
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index 79cfe5813..5e8c20e55 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -2494,6 +2494,27 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
+             agent._client_log_context(),
+         )
+         return client
++    if agent.provider == "opencode-acp" or str(client_kwargs.get("base_url", "")).startswith("acp://opencode"):
++        from agent.opencode_acp_client import get_or_create_client
++
++        # Use the cached factory: same model = same persistent process,
++        # different model = fresh process with OPENCODE_MODEL env var.
++        client = get_or_create_client(
++            command=client_kwargs.get("command") or client_kwargs.get("acp_command"),
++            args=client_kwargs.get("args") or client_kwargs.get("acp_args"),
++            cwd=client_kwargs.get("acp_cwd"),
++            model=getattr(agent, "model", None),
++            api_key=client_kwargs.get("api_key"),
++            base_url=client_kwargs.get("base_url"),
++        )
++        _ra().logger.info(
++            "OpenCode ACP client %s (%s, shared=%s) %s",
++            "reused" if not client.is_closed else "created",
++            reason,
++            shared,
++            agent._client_log_context(),
++        )
++        return client
+     if agent.provider == "gemini":
+         from agent.gemini_native_adapter import GeminiNativeClient, is_native_gemini_base_url
+ 
