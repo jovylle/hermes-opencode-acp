@@ -5,6 +5,8 @@ description: OpenCode ACP provider for Hermes Agent — use OpenCode as a coding
 ![Screenshot](./public/images/image.png)
 # hermes-opencode-acp
 
+**🌐 Landing page: [hermes-opencode-acp.uft1.com](https://hermes-opencode-acp.uft1.com)** — static, hosted on Cloudflare Pages (free). Updates when `site/index.html` changes: `npx wrangler pages deploy site --project-name hermes-opencode-acp`.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Use [OpenCode](https://opencode.ai) as a coding agent backend for [Hermes Agent](https://github.com/NousResearch/hermes-agent) via the Agent Client Protocol (ACP).
