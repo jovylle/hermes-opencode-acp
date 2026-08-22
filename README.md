@@ -152,6 +152,19 @@ fallback_providers:
     base_url: acp://opencode
 ```
 
+> **Model switching keeps the session (1:1 continuation).**  The client cache
+> is keyed by `(command, args, cwd)` — NOT by model.  When Hermes falls back
+> to a different model (or you `/model`-switch), the *same* OpenCode process
+> and session stay alive and the new model is applied in place via
+> `session/set_config_option` (verified live on opencode 1.18.20: the session
+> recalls earlier context after the switch).  No fresh process, no history loss.
+
+> **Model picking is ACP-native.**  `/model` and `hermes model` now probe the
+> `opencode acp` server itself for its advertised model catalog (the same list
+> it validates `session/set_config_option` against) instead of the GitHub
+> Copilot catalog.  `opencode models` CLI remains the fallback, then the static
+> list.
+
 ## Architecture
 
 ```

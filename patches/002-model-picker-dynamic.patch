@@ -1,8 +1,8 @@
 diff --git a/hermes_cli/model_setup_flows.py b/hermes_cli/model_setup_flows.py
-index 6e54ac747..ec4b90b12 100644
+index 6e54ac747..14490ce5c 100644
 --- a/hermes_cli/model_setup_flows.py
 +++ b/hermes_cli/model_setup_flows.py
-@@ -2112,6 +2112,106 @@ def _model_flow_copilot_acp(config, current_model=""):
+@@ -2112,6 +2112,116 @@ def _model_flow_copilot_acp(config, current_model=""):
  
      print(f"Default model set to: {selected} (via {pconfig.name})")
  
@@ -50,21 +50,31 @@ index 6e54ac747..ec4b90b12 100644
 +
 +    effective_base = creds.get("base_url") or effective_base
 +
-+    # ── Dynamic model list from `opencode models` ──
++    # ── Dynamic model list: ACP probe first, `opencode models` fallback ──
++    # The ACP probe is the authoritative catalog (the exact list the server
++    # validates session/set_config_option against); the CLI parse is a
++    # reliable fallback when the ACP handshake fails.
 +    model_list = []
 +    try:
-+        result = subprocess.run(
-+            [resolved_command, "models"],
-+            capture_output=True, text=True, timeout=10,
-+            env={**os.environ, "NO_COLOR": "1"},
-+        )
-+        if result.returncode == 0 and result.stdout.strip():
-+            model_list = [
-+                line.strip() for line in result.stdout.strip().splitlines()
-+                if line.strip() and "/" in line.strip()
-+            ]
-+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-+        pass
++        from agent.opencode_acp_client import probe_opencode_models
++
++        model_list = probe_opencode_models(command=resolved_command)
++    except Exception:
++        model_list = []
++    if not model_list:
++        try:
++            result = subprocess.run(
++                [resolved_command, "models"],
++                capture_output=True, text=True, timeout=10,
++                env={**os.environ, "NO_COLOR": "1"},
++            )
++            if result.returncode == 0 and result.stdout.strip():
++                model_list = [
++                    line.strip() for line in result.stdout.strip().splitlines()
++                    if line.strip() and "/" in line.strip()
++                ]
++        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
++            pass
 +
 +    if model_list:
 +        print(f"  Found {len(model_list)} model(s) from OpenCode")

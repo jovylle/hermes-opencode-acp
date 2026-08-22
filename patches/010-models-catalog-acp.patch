@@ -1,5 +1,5 @@
 diff --git a/hermes_cli/models.py b/hermes_cli/models.py
-index 91129db7b..d0689c972 100644
+index 91129db7b..c4453d839 100644
 --- a/hermes_cli/models.py
 +++ b/hermes_cli/models.py
 @@ -340,6 +340,9 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
@@ -38,12 +38,48 @@ index 91129db7b..d0689c972 100644
      "google": "gemini",
      "google-gemini": "gemini",
      "google-ai-studio": "gemini",
-@@ -3639,7 +3645,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False)
-         except Exception:
-             access_token = None
-         return get_codex_model_ids(access_token=access_token)
--    if normalized in {"copilot", "copilot-acp"}:
-+    if normalized in {"copilot", "copilot-acp", "opencode-acp"}:
+@@ -3648,6 +3654,44 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False)
+             pass
+         if normalized == "copilot-acp":
+             return list(_PROVIDER_MODELS.get("copilot", []))
++    if normalized == "opencode-acp":
++        # ACP-native probe first: the model catalog the opencode acp server
++        # itself advertises (the same list it validates
++        # session/set_config_option against).  Fall back to the `opencode
++        # models` CLI parse, then to the static list.
++        try:
++            from agent.opencode_acp_client import probe_opencode_models
++
++            live = probe_opencode_models()
++            if live:
++                return live
++        except Exception:
++            pass
++        try:
++            import shutil
++            import subprocess as _sp
++
++            resolved_command = (
++                os.getenv("HERMES_OPENCODE_ACP_COMMAND", "").strip()
++                or os.getenv("OPENCODE_BIN", "").strip()
++                or "opencode"
++            )
++            if shutil.which(resolved_command):
++                result = _sp.run(
++                    [resolved_command, "models"],
++                    capture_output=True, text=True, timeout=10,
++                    env={**os.environ, "NO_COLOR": "1"},
++                )
++                if result.returncode == 0 and result.stdout.strip():
++                    cli_models = [
++                        line.strip() for line in result.stdout.strip().splitlines()
++                        if line.strip() and "/" in line.strip()
++                    ]
++                    if cli_models:
++                        return cli_models
++        except Exception:
++            pass
++        return list(_PROVIDER_MODELS.get("opencode-acp", []))
+     if normalized == "nous":
+         # Try live Nous Portal /models endpoint
          try:
-             live = _fetch_github_models(_resolve_copilot_catalog_api_key())
-             if live:

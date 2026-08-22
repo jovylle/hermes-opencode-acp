@@ -52,6 +52,14 @@ _OPENCODE_PARAM_NAME_RE = re.compile(r"<parameter=name>(.*?)</parameter>", re.DO
 _OPENCODE_PARAM_ARGS_RE = re.compile(r"<parameter=arguments>(.*?)</parameter>", re.DOTALL)
 
 
+def _normalise_model(value: str | None) -> str:
+    """Normalise a model id for comparison: strip the ``opencode/`` prefix."""
+    v = (value or "").strip()
+    if v.lower().startswith("opencode/"):
+        return v[len("opencode/"):]
+    return v
+
+
 def _resolve_command() -> str:
     return (
         os.getenv("HERMES_OPENCODE_ACP_COMMAND", "").strip()
@@ -502,6 +510,12 @@ class OpenCodeACPClient:
         self._next_id: int = 0
         self._session_id: str | None = None
         self._initialized: bool = False
+        # The model the *openCode session* is actually running.  Read from
+        # session/new configOptions (currentValue) after handshake, updated
+        # whenever we apply a different model via session/set_config_option.
+        self._session_model: str | None = None
+        # Model catalog the session advertises (configOptions model options).
+        self._model_catalog: list[str] = []
 
     def close(self) -> None:
         proc: subprocess.Popen[str] | None
@@ -510,6 +524,7 @@ class OpenCodeACPClient:
             self._proc = None
             self._session_id = None
             self._initialized = False
+            self._session_model = None
         self.is_closed = True
         if proc is None:
             return
@@ -566,6 +581,38 @@ class OpenCodeACPClient:
             ]
             _numeric = [float(v) for v in _candidates if isinstance(v, (int, float))]
             _effective_timeout = max(_numeric) if _numeric else _DEFAULT_TIMEOUT_SECONDS
+
+        # ── Mid-session model switch (fallback / /model) ──
+        # If Hermes now wants a different model than the live session is
+        # running, switch it in place via session/set_config_option.  This is
+        # what keeps a 1:1 Hermes-session → OpenCode-session mapping across
+        # fallback-model changes instead of spawning a fresh process.
+        requested = (model or self._acp_model or "").strip() or None
+        if (
+            requested
+            and self._initialized
+            and self._session_id
+            and _normalise_model(self._session_model) != _normalise_model(requested)
+        ):
+            try:
+                self._send_request(
+                    "session/set_config_option",
+                    {
+                        "sessionId": self._session_id,
+                        "configId": "model",
+                        "value": requested,
+                    },
+                    timeout_seconds=max(_effective_timeout, 60.0),
+                )
+                self._session_model = requested
+            except Exception:
+                # Switching failed (model not in catalog / server too old) —
+                # continue with the session's current model.
+                pass
+        elif requested and not self._initialized:
+            # Cold start: remember the requested model; _ensure_process applies
+            # it right after session/new.
+            self._acp_model = requested
 
         response_text, reasoning_text = self._run_prompt(
             prompt_text,
@@ -704,6 +751,44 @@ class OpenCodeACPClient:
             self._session_id = str(session.get("sessionId") or "").strip()
             if not self._session_id:
                 raise RuntimeError("OpenCode ACP did not return a sessionId.")
+
+            # ── Capture the session's real model + model catalog ──
+            # OpenCode resolves its model from config at startup; the
+            # OPENCODE_MODEL env var is *not* authoritative for `opencode acp`
+            # (session/new returns the config default regardless).  The
+            # configOptions block lists the model select with currentValue
+            # (what the session would run) and options (the model catalog).
+            config_options = session.get("configOptions") or []
+            model_option = next(
+                (opt for opt in config_options if opt.get("id") == "model"),
+                None,
+            )
+            self._model_catalog = [
+                str(o.get("value") or "") for o in (model_option or {}).get("options") or []
+                if o.get("value")
+            ]
+            self._session_model = str((model_option or {}).get("currentValue") or "").strip() or None
+
+            # ── Apply the configured model if it differs from the default ──
+            # session/set_config_option is the ONLY reliable lever (verified
+            # live on opencode 1.18.20).  Fails soft: keep the server default.
+            if self._acp_model and _normalise_model(self._session_model) != _normalise_model(self._acp_model):
+                try:
+                    self._send_request(
+                        "session/set_config_option",
+                        {
+                            "sessionId": self._session_id,
+                            "configId": "model",
+                            "value": self._acp_model,
+                        },
+                        timeout_seconds=timeout_seconds,
+                    )
+                    self._session_model = self._acp_model
+                except Exception:
+                    # Model not in this session's catalog / server too old —
+                    # opencode runs its config default; not fatal.
+                    pass
+
             self._initialized = True
 
     def _send_request(
@@ -888,10 +973,13 @@ class OpenCodeACPClient:
 
 
 # ── Module-level client cache ──
-# Maps (command, args_tuple, cwd, model) → live OpenCodeACPClient.
+# Maps (command, args_tuple, cwd) → live OpenCodeACPClient.
 # Prevents Hermes from spawning a new opencode process on every turn.
-# Keyed by model so model-switch (/model) correctly starts a fresh process.
-_CLIENT_CACHE: dict[tuple[str, tuple[str, ...], str, str | None], OpenCodeACPClient] = {}
+# Model is deliberately NOT part of the key: a model switch (fallback chain
+# or /model) reuses the same process + session and applies the new model
+# in place via session/set_config_option — that is what keeps a true 1:1
+# Hermes-session → OpenCode-session mapping across model changes.
+_CLIENT_CACHE: dict[tuple[str, tuple[str, ...], str], OpenCodeACPClient] = {}
 _CLIENT_CACHE_LOCK = threading.Lock()
 
 
@@ -906,24 +994,24 @@ def get_or_create_client(
 ) -> OpenCodeACPClient:
     """Return a cached OpenCodeACPClient or create a new one.
 
-    The cache key includes model, so switching models via /model
-    (which changes the fallback entry) spawns a fresh OpenCode process
-    with the new OPENCODE_MODEL env var.  Same model = same client =
-    persistent session across Hermes turns.
+    The cache key is (command, args, cwd) — model is intentionally excluded.
+    Switching models reuses the same process and applies the new model in
+    place via ``session/set_config_option`` (see _create_chat_completion),
+    so the session's history and OpenCode-native state survive the switch.
     """
     resolved_cmd = command or _resolve_command()
     resolved_args = tuple(args or _resolve_args())
     resolved_cwd = str(Path(cwd or os.getcwd()).resolve())
-    # Normalise model for cache key: strip "opencode/" prefix.
-    cache_model = model.strip() if model else None
-    if cache_model and cache_model.lower().startswith("opencode/"):
-        cache_model = cache_model[len("opencode/"):]
 
-    key = (resolved_cmd, resolved_args, resolved_cwd, cache_model)
+    key = (resolved_cmd, resolved_args, resolved_cwd)
 
     with _CLIENT_CACHE_LOCK:
         client = _CLIENT_CACHE.get(key)
         if client is not None and not client.is_closed:
+            # Update the desired model so a cold-start / fallback request
+            # picks up the latest requested model too.
+            if model and client._acp_model != model:
+                client._acp_model = model
             return client
 
     # Create outside the lock (avoid holding lock during import/init).
@@ -957,6 +1045,40 @@ def close_all_clients() -> int:
                 pass
         _CLIENT_CACHE.clear()
     return count
+
+
+def probe_opencode_models(
+    *,
+    command: str | None = None,
+    args: list[str] | None = None,
+    cwd: str | None = None,
+    timeout: float = 25.0,
+) -> list[str]:
+    """Discover the model catalog a real ``opencode acp`` server advertises.
+
+    Spawns a short-lived ACP session, reads the ``model`` configOption's
+    option list (the authoritative catalog the server itself validates
+    ``session/set_config_option`` against), and tears the process down.
+    Returns ``[]`` on any failure so callers can fall back to the CLI
+    (``opencode models``) or static lists — never raises.
+    """
+    client: OpenCodeACPClient | None = None
+    try:
+        client = OpenCodeACPClient(
+            command=command,
+            args=args,
+            acp_cwd=cwd,
+        )
+        client._ensure_process(timeout_seconds=timeout)  # noqa: SLF001
+        return list(client._model_catalog)
+    except Exception:
+        return []
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 # Ensure lingering ACP processes are terminated when the Python process exits.
