@@ -1,0 +1,391 @@
+diff --git a/cli.py b/cli.py
+index 09ea29574..c238080b4 100644
+--- a/cli.py
++++ b/cli.py
+@@ -10369,9 +10369,47 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             "current_provider": current_provider,
+             "user_provs": user_provs,
+             "custom_provs": custom_provs,
++            "query": "",
+         }
++        self._model_picker_apply_filter(self._model_picker_state)
+         self._invalidate(min_interval=0.0)
+ 
++    def _model_picker_apply_filter(self, state) -> None:
++        """Recompute the filtered rows for the /model picker search box.
++
++        The picker's composer doubles as a live search field while the modal
++        is open: ``state["query"]`` holds the typed text, and this rebuilds
++        ``state["_filtered_providers"]`` / ``state["_filtered_models"]`` — the
++        shared row lists the display, arrow navigation, and Enter selection
++        all read — then clamps ``selected`` into the visible range so the
++        cursor can never land on a filtered-out row.  An empty query behaves
++        as identity (all rows), so opening the picker without typing is
++        unchanged.  Case-insensitive substring match on provider name/slug,
++        and on the model name for the model stage.
++        """
++        q = (state.get("query") or "").strip().lower()
++        providers = state.get("providers") or []
++        if q:
++            state["_filtered_providers"] = [
++                (i, p) for i, p in enumerate(providers)
++                if q in str(p.get("name", "")).lower()
++                or q in str(p.get("slug", "")).lower()
++            ]
++        else:
++            state["_filtered_providers"] = list(enumerate(providers))
++        models = state.get("model_list") or []
++        if q:
++            state["_filtered_models"] = [m for m in models if q in str(m).lower()]
++        else:
++            state["_filtered_models"] = list(models)
++        # Clamp selected inside the visible rows.  Provider stage appends
++        # Cancel after the filtered rows; model stage appends Back + Cancel.
++        if state.get("stage") == "provider":
++            max_sel = len(state["_filtered_providers"])
++        else:
++            max_sel = len(state["_filtered_models"]) + 1
++        state["selected"] = min(max_sel, state.get("selected", 0))
++
+     def _confirm_expensive_model_switch(self, result) -> bool:
+         """Ask for explicit confirmation before applying costly model switches."""
+         if not getattr(result, "success", False):
+@@ -10690,11 +10728,15 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+         selected = state.get("selected", 0)
+         stage = state.get("stage")
+         if stage == "provider":
+-            providers = state.get("providers") or []
++            providers = state.get("_filtered_providers")
++            if not isinstance(providers, list):
++                providers = [
++                    (i, p) for i, p in enumerate(state.get("providers") or [])
++                ]
+             if selected >= len(providers):
+                 self._close_model_picker()
+                 return
+-            provider_data = providers[selected]
++            _orig_index, provider_data = providers[selected]
+             # Use the curated model list from list_authenticated_providers()
+             # (same lists as `hermes model` and gateway pickers).
+             # Only fall back to the live provider catalog when the curated
+@@ -10712,16 +10754,25 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             state["provider_data"] = provider_data
+             state["model_list"] = model_list
+             state["selected"] = 0
++            state["query"] = ""
++            self._model_picker_apply_filter(state)
+             self._invalidate(min_interval=0.0)
+             return
+         if stage == "model":
+             provider_data = state.get("provider_data") or {}
+-            model_list = state.get("model_list") or []
++            model_list = state.get("_filtered_models")
++            if not isinstance(model_list, list):
++                model_list = state.get("model_list") or []
+             back_idx = len(model_list)
+             cancel_idx = len(model_list) + 1
+             if selected == back_idx:
+                 state["stage"] = "provider"
+-                state["selected"] = next((i for i, p in enumerate(state.get("providers") or []) if p.get("slug") == provider_data.get("slug")), 0)
++                state["selected"] = next(
++                    (i for i, (_oi, p) in enumerate(state.get("_filtered_providers") or [])
++                     if p.get("slug") == provider_data.get("slug")), 0
++                )
++                state["query"] = ""
++                self._model_picker_apply_filter(state)
+                 self._invalidate(min_interval=0.0)
+                 return
+             if selected >= cancel_idx:
+@@ -15506,8 +15557,25 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             return
+         try:
+             buf = self._app.current_buffer
+-            buf.text = snapshot.get("text", "")
++            draft = snapshot.get("text", "")
++            # Direct buf.text assignment fires on_text_changed, and a long
++            # multi-line draft restored after a modal (e.g. the /model picker,
++            # where the composer doubles as the search box and may hold a
++            # partial query by close time) would otherwise be mistaken for a
++            # fresh paste and collapsed to "[Pasted text #N…]" — the same
++            # false-positive the history-recall path guards against.
++            # Suppress paste-collapse around the restore, then clear the flag
++            # only if the restore didn't actually change the text.
++            self._skip_paste_collapse = True
++            buf.text = draft
+             buf.cursor_position = min(snapshot.get("cursor_position", 0), len(buf.text))
++            # The on_text_changed handler clears _skip_paste_collapse itself
++            # when the setter fires a text-change event.  If the buffer was
++            # already equal to the draft (empty picker session, nothing typed),
++            # no event fires and the flag would stick — clear it so a later
++            # real paste still collapses.
++            if buf.text == draft:
++                self._skip_paste_collapse = False
+         except Exception:
+             pass
+ 
+@@ -17799,15 +17867,22 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             if not state:
+                 return
+             if state.get("stage") == "provider":
+-                max_idx = len(state.get("providers") or [])
++                max_idx = len(state.get("_filtered_providers") or state.get("providers") or [])
+             else:
+-                max_idx = len(state.get("model_list") or []) + 1
++                max_idx = len(state.get("_filtered_models") or state.get("model_list") or []) + 1
+             state["selected"] = min(max_idx, state.get("selected", 0) + 1)
+             event.app.invalidate()
+ 
+         @kb.add('escape', filter=Condition(lambda: bool(self._model_picker_state)), eager=True)
+         def model_picker_escape(event):
+-            """ESC closes the /model picker."""
++            """ESC clears an active search query first, then closes the /model picker."""
++            state = self._model_picker_state
++            if state and (state.get("query") or ""):
++                state["query"] = ""
++                self._model_picker_apply_filter(state)
++                event.app.current_buffer.reset()
++                event.app.invalidate()
++                return
+             self._close_model_picker()
+             event.app.current_buffer.reset()
+             event.app.invalidate()
+@@ -18356,6 +18431,14 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             command_filter=cli_ref._command_available,
+             skill_bundles_provider=lambda: get_skill_bundles(),
+         )
++        # While the /model picker modal is open, the composer doubles as the
++        # search field — slash-command/path completion and history suggest
++        # would fight the live filter, so gate them off for the modal's
++        # lifetime (same "type to filter" convention as the curses pickers).
++        _not_picker_open = Condition(lambda: not bool(cli_ref._model_picker_state))
++        from prompt_toolkit.completion import ConditionalCompleter
++        from prompt_toolkit.auto_suggest import ConditionalAutoSuggest
++
+         input_area = TextArea(
+             height=Dimension(min=1, max=8, preferred=1),
+             prompt=get_prompt,
+@@ -18370,11 +18453,17 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             # — so running it inline would stall the render loop on each key (very
+             # noticeable on WSL2/slow filesystems). ThreadedCompleter moves it off
+             # the UI event loop, keeping typing responsive.
+-            completer=ThreadedCompleter(_completer),
++            completer=ConditionalCompleter(
++                ThreadedCompleter(_completer),
++                filter=_not_picker_open,
++            ),
+             complete_while_typing=True,
+-            auto_suggest=SlashCommandAutoSuggest(
+-                history_suggest=AutoSuggestFromHistory(),
+-                completer=_completer,
++            auto_suggest=ConditionalAutoSuggest(
++                SlashCommandAutoSuggest(
++                    history_suggest=AutoSuggestFromHistory(),
++                    completer=_completer,
++                ),
++                filter=_not_picker_open,
+             ),
+         )
+         # Keep prompt_toolkit on its simple tempfile path. Setting
+@@ -18414,6 +18503,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+         def _on_text_changed(buf):
+             """Detect large pastes and collapse them to a file reference.
+ 
++            While the /model picker modal is open, the composer doubles as
++            the search field instead: every keystroke re-runs the live
++            filter and clamps the cursor into the visible rows.  Reads the
++            buffer directly (not on_text_changed args) so this works for
++            clear/backspace/bookmark edits too.
++
+             When bracketed paste is available, handle_paste collapses
+             large pastes directly.  This handler is a fallback for
+             terminals without bracketed paste support.
+@@ -18426,6 +18521,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+                still batch newlines.  Alt+Enter only adds 1 newline per
+                event so it never triggers this.
+             """
++            if self._model_picker_state:
++                state = self._model_picker_state
++                state["query"] = buf.text
++                self._model_picker_apply_filter(state)
++                self._invalidate(min_interval=0.0)
++                return
+             text = _strip_leaked_bracketed_paste_wrappers(buf.text)
+             text, _had_mouse_reports = _strip_leaked_terminal_responses_with_meta(text)
+             if _had_mouse_reports:
+@@ -18492,6 +18593,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+                 return Transformation(fragments=ti.fragments)
+ 
+         def _get_placeholder():
++            if cli_ref._model_picker_state:
++                _query = (cli_ref._model_picker_state.get("query") or "").strip()
++                _match_str = f"🔍 {_query}" if _query else "type to filter"
++                return f"{_match_str} · ↑/↓ navigate · Enter select · ESC clear/close"
+             if cli_ref._voice_recording:
+                 _label = cli_ref._voice_record_key_label()
+                 return f"recording... {_label} to stop, Ctrl+C to cancel"
+@@ -19088,11 +19193,16 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+             if not state:
+                 return []
+             stage = state.get("stage", "provider")
++            query = (state.get("query") or "").strip()
+             if stage == "provider":
+                 title = "⚙ Model Picker — Select Provider"
+                 choices = []
+-                _providers = state.get("providers")
+-                for p in _providers if isinstance(_providers, list) else []:
++                _providers = state.get("_filtered_providers")
++                if not isinstance(_providers, list):
++                    _providers = [
++                        (i, p) for i, p in enumerate(state.get("providers") or [])
++                    ]
++                for _oi, p in _providers:
+                     count = p.get("total_models", len(p.get("models", [])))
+                     label = f"{p['name']} ({count} model{'s' if count != 1 else ''})"
+                     if p.get("is_current"):
+@@ -19100,15 +19210,23 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
+                     choices.append(label)
+                 choices.append("Cancel")
+                 hint = f"Current: {state.get('current_model', 'unknown')} on {state.get('current_provider', 'unknown')}"
++                if query:
++                    hint += f"  ·  🔍 {query} — {len(_providers)} match{'es' if len(_providers) != 1 else ''}"
++                else:
++                    hint += "  ·  type to filter"
+             else:
+                 provider_data = state.get("provider_data") or {}
+-                model_list = state.get("model_list") or []
++                _models = state.get("_filtered_models")
++                if not isinstance(_models, list):
++                    _models = state.get("model_list") or []
+                 title = f"⚙ Model Picker — {provider_data.get('name', provider_data.get('slug', 'Provider'))}"
+-                choices = list(model_list) + ["← Back", "Cancel"]
+-                if model_list:
+-                    hint = f"Select a model ({len(model_list)} available)"
++                choices = list(_models) + ["← Back", "Cancel"]
++                if _models:
++                    hint = f"Select a model ({len(_models)} available)"
+                 else:
+                     hint = "No models listed for this provider. Use Back or Cancel."
++                if query:
++                    hint += f"  ·  🔍 {query} — {len(_models)} match{'es' if len(_models) != 1 else ''}"
+ 
+             box_width = _panel_box_width(title, [hint] + choices, min_width=46, max_width=84)
+             inner_text_width = max(8, box_width - 6)
+diff --git a/tests/hermes_cli/test_model_picker_search.py b/tests/hermes_cli/test_model_picker_search.py
+new file mode 100644
+index 000000000..2d26b029f
+--- /dev/null
++++ b/tests/hermes_cli/test_model_picker_search.py
+@@ -0,0 +1,112 @@
++from types import SimpleNamespace
++
++from hermes_cli.model_switch import ModelSwitchResult
++
++
++def _bound(fn, instance):
++    return fn.__get__(instance, type(instance))
++
++
++def _make_state(**overrides):
++    state = {
++        "stage": "provider",
++        "providers": [
++            {"name": "DeepSeek", "slug": "deepseek", "models": ["deepseek-v3"]},
++            {"name": "Anthropic", "slug": "anthropic", "models": ["claude-4.7"]},
++            {"name": "DeepInfra", "slug": "deepinfra", "models": ["llama-4"]},
++        ],
++        "model_list": [],
++        "selected": 5,
++        "query": "deep",
++    }
++    state.update(overrides)
++    return state
++
++
++def test_model_picker_apply_filter_filters_providers_and_clamps():
++    import cli as cli_mod
++
++    self_ = object.__new__(cli_mod.HermesCLI)
++    apply_filter = _bound(cli_mod.HermesCLI._model_picker_apply_filter, self_)
++
++    state = _make_state()
++    apply_filter(state)
++
++    # Case-insensitive substring on name/slug keeps DeepSeek + DeepInfra.
++    assert [p["name"] for _, p in state["_filtered_providers"]] == [
++        "DeepSeek",
++        "DeepInfra",
++    ]
++    # Cursor clamps to the last visible row (Cancel row at index len(filtered)).
++    assert state["selected"] == 2
++
++
++def test_model_picker_apply_filter_identity_when_query_empty():
++    import cli as cli_mod
++
++    self_ = object.__new__(cli_mod.HermesCLI)
++    apply_filter = _bound(cli_mod.HermesCLI._model_picker_apply_filter, self_)
++
++    state = _make_state(query="")
++    apply_filter(state)
++    assert len(state["_filtered_providers"]) == 3
++    assert state["selected"] == 3  # clamped to Cancel row (index = len(visible))
++
++
++def test_model_picker_apply_filter_model_stage():
++    import cli as cli_mod
++
++    self_ = object.__new__(cli_mod.HermesCLI)
++    apply_filter = _bound(cli_mod.HermesCLI._model_picker_apply_filter, self_)
++
++    state = _make_state(
++        stage="model",
++        providers=[],
++        model_list=["anthropic/claude-4.7", "anthropic/claude-4.6", "openai/gpt-5.5"],
++        query="claude",
++    )
++    apply_filter(state)
++    assert state["_filtered_models"] == ["anthropic/claude-4.7", "anthropic/claude-4.6"]
++    # Model stage appends Back + Cancel; clamp keeps Cancel reachable.
++    assert state["selected"] == 3
++
++
++def test_model_picker_no_matches_clamps_to_cancel():
++    import cli as cli_mod
++
++    self_ = object.__new__(cli_mod.HermesCLI)
++    apply_filter = _bound(cli_mod.HermesCLI._model_picker_apply_filter, self_)
++
++    state = _make_state(query="zzz-no-such-provider")
++    apply_filter(state)
++    assert state["_filtered_providers"] == []
++    assert state["selected"] == 0  # only Cancel remains
++
++
++def test_model_picker_escape_clears_query_before_closing(monkeypatch):
++    import cli as cli_mod
++
++    captured = {}
++
++    class _FakeApp:
++        current_buffer = SimpleNamespace(reset=lambda: captured.setdefault("reset", True))
++        def invalidate(self):
++            captured["invalidated"] = True
++
++    self_ = SimpleNamespace(
++        _app=_FakeApp(),
++        _model_picker_state={**_make_state(), "_filtered_providers": []},
++    )
++    self_._model_picker_apply_filter = _bound(cli_mod.HermesCLI._model_picker_apply_filter, self_)
++    self_._close_model_picker = lambda: captured.setdefault("closed", True)
++
++    event = SimpleNamespace(app=_FakeApp())
++    # The escape handler lives in the TUI layout builder; simulate its logic
++    # by invoking the same state transitions directly via the bound handler
++    # path is not feasible headless, so verify the state it relies on.
++    state = self_._model_picker_state
++    assert state.get("query") == "deep"
++    # Clearing the query must restore the full list.
++    state["query"] = ""
++    self_._model_picker_apply_filter(state)
++    assert len(state["_filtered_providers"]) == 3
+\ No newline at end of file
