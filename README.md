@@ -13,6 +13,12 @@ Connects Hermes to OpenCode via JSON-RPC over stdio. OpenCode handles model sele
 
 > **⚠️ Early / Experimental** — This is early-stage code and may have bugs. Tested with Hermes Agent on macOS; other platforms or Hermes versions may behave differently. If something breaks, please open an issue. Contributions welcome.
 
+> **👀 Upstream watch** — Hermes Agent core is planning its own generalized
+> ACP client (NousResearch/hermes-agent#5257, OpenCode already on their
+> 14-agent list). We are closely tracking it: when it lands, this repo's
+> patch set gets absorbed into core and can be deleted — config stays
+> compatible. See [UPSTREAM.md](./UPSTREAM.md) for the migration checklist.
+
 ## Features
 
 - **200+ models** — access OpenCode's full catalog (Anthropic, OpenAI, Google, DeepSeek, etc.) without managing API keys individually
