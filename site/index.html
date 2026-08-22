@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hermes-opencode-acp — OpenCode as a Hermes Agent provider</title>
+<meta name="description" content="Use OpenCode's full model catalog (200+ models) as a Hermes Agent provider over the Agent Client Protocol. Persistent sessions, ACP-native model picking, fallback-chain ready.">
+<style>
+:root{
+  --ink:#0a0e14; --panel:#0f151d; --panel2:#121a24; --line:#1e2936;
+  --text:#e6edf3; --muted:#8b949e; --dim:#5c6773;
+  --accent:#2dd4a7; --accent-ink:#06110d; --amber:#f0b429;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--ink);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+.mono,code,pre{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* nav */
+nav{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(10,14,18,.92);backdrop-filter:blur(6px);z-index:10}
+.brand{font-weight:600;font-size:15px}
+.brand .dot{color:var(--accent)}
+.navlinks{display:flex;gap:22px;font-size:14px;color:var(--muted)}
+.navlinks a{color:var(--muted)}
+.navlinks a:hover{color:var(--text)}
+
+/* hero */
+header.hero{padding:88px 0 72px;border-bottom:1px solid var(--line)}
+.hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;align-items:center}
+.hero h1{font-size:clamp(30px,4.4vw,46px);line-height:1.15;letter-spacing:-.02em;font-weight:700}
+.hero h1 .grad{color:var(--accent)}
+.hero .lede{margin-top:18px;font-size:17px;color:var(--muted);max-width:34em}
+.badges{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap}
+.badge{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+.badge b{color:var(--text);font-weight:600}
+.cta{margin-top:32px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:11px 20px;border-radius:8px;font-size:14.5px;font-weight:600;transition:transform .12s}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-ghost{border:1px solid var(--line);color:var(--text)}
+.btn-ghost:hover{border-color:var(--muted)}
+
+/* wire diagram */
+.wire{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 20px;font-size:12.5px;line-height:1.85;color:var(--muted)}
+.wire .t{color:var(--text);font-weight:600;margin-bottom:10px;font-size:13px}
+.wire .box{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 10px;color:var(--text)}
+.wire .box.accent{border-color:var(--accent);color:var(--accent)}
+.wire .dir{color:var(--dim)}
+.wire .row{padding:3px 0}
+.wire .arrow{color:var(--accent)}
+.wire .note{color:var(--dim);padding-left:6px}
+
+/* sections */
+section{padding:64px 0;border-bottom:1px solid var(--line)}
+.kicker{font-family:ui-monospace,monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+h2{font-size:clamp(22px,3vw,30px);font-weight:700;letter-spacing:-.015em;margin-bottom:14px}
+.sec-sub{color:var(--muted);max-width:42em;margin-bottom:36px;font-size:15.5px}
+
+/* spec features */
+.spec{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.spec .row{display:flex;gap:18px;padding:18px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.spec .row:nth-child(even){border-left:1px solid var(--line)}
+.spec .row:nth-last-child(-n+2){border-bottom:none}
+.spec .k{font-family:ui-monospace,monospace;font-size:13px;color:var(--accent);white-space:nowrap;padding-top:2px;min-width:120px}
+.spec .v{color:var(--muted);font-size:14.5px}
+.spec .v b{color:var(--text);font-weight:600}
+
+/* config block */
+.codebox{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.codebox .bar{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim)}
+.codebox .bar .dots span{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+.codebox pre{padding:18px 20px;font-size:13.5px;line-height:1.7;overflow-x:auto;color:var(--text)}
+.codebox .c-kw{color:var(--accent)}
+.codebox .c-s{color:var(--muted)}
+.codebox .c-cm{color:var(--dim)}
+
+/* upstream watch */
+.watch{border:1px solid #3d3320;background:#171310;border-radius:12px;padding:24px 26px}
+.watch .title{font-size:14px;font-weight:700;color:var(--amber);margin-bottom:10px}
+.watch p{color:var(--muted);font-size:14.5px}
+.watch .mono{color:var(--text)}
+
+/* footer */
+footer{padding:40px 0 56px;color:var(--dim);font-size:13.5px}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+@media(max-width:860px){
+  .hero-grid{grid-template-columns:1fr;gap:36px}
+  .hero{padding:56px 0 48px}
+  .spec{grid-template-columns:1fr}
+  .spec .row:nth-child(even){border-left:none}
+  .spec .row:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
+  .spec .row:last-child{border-bottom:none}
+}
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand"><span class="dot">●</span> hermes-opencode-acp</div>
+  <div class="navlinks">
+    <a href="#features">Features</a>
+    <a href="#quickstart">Quick start</a>
+    <a href="#upstream">Upstream</a>
+    <a href="https://github.com/jovylle/hermes-opencode-acp">GitHub</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="kicker">Hermes Agent × OpenCode · via Agent Client Protocol</div>
+      <h1>OpenCode's full model catalog, <span class="grad">as a Hermes provider</span></h1>
+      <p class="lede">Wires Hermes Agent to OpenCode over ACP (JSON-RPC over stdio). One persistent process and session — streaming, tool calls, and model switching all stay in place. 200+ models across Anthropic, OpenAI, Google, DeepSeek and more, with OpenCode handling auth and fallbacks.</p>
+      <div class="badges">
+        <span class="badge"><b>200+</b> models</span>
+        <span class="badge"><b>1:1</b> persistent sessions</span>
+        <span class="badge"><b>ACP</b> native model picking</span>
+        <span class="badge"><b>free</b> tier via OpenCode Go</span>
+      </div>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/jovylle/hermes-opencode-acp">View on GitHub</a>
+        <a class="btn btn-ghost" href="#quickstart">Quick start</a>
+      </div>
+    </div>
+    <div class="wire" aria-label="Architecture diagram">
+      <div class="t">wire — one process, one session</div>
+      <div class="row"><span class="box accent">Hermes</span> <span class="dir">delegates a turn</span></div>
+      <div class="row"><span class="dir">└─</span> JSON-RPC <span class="arrow">───▶</span> <span class="box">opencode acp</span></div>
+      <div class="row"><span class="dir">└─</span> OpenCode picks model + tools</div>
+      <div class="row"><span class="box">opencode acp</span> <span class="arrow">───▶</span> HTTP <span class="arrow">───▶</span> <span class="box">LLM provider</span></div>
+      <div class="row"><span class="dir">└─</span> streams <span class="mono">agent_message_chunk</span> back</div>
+      <div class="row"><span class="dir">└─</span> tool calls re-parsed for Hermes's loop</div>
+      <div class="row" style="margin-top:8px"><span class="note">model switch = session/set_config_option,</span></div>
+      <div class="row"><span class="note">no respawn, history retained</span></div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="kicker">what you get</div>
+    <h2>Features</h2>
+    <p class="sec-sub">OpenCode is the backend, so you inherit its agentic loop — model selection, tool use, plugin fallbacks — while Hermes drives the ACP wire.</p>
+    <div class="spec">
+      <div class="row"><span class="k">catalog</span><span class="v">Full OpenCode catalog — <b>200+ models</b> (Anthropic, OpenAI, Google, DeepSeek, Kimi…). No per-provider API keys; OpenCode handles auth.</span></div>
+      <div class="row"><span class="k">sessions</span><span class="v"><b>Persistent process + session</b> per (command, args, cwd). No respawn per turn, no context loss.</span></div>
+      <div class="row"><span class="k">model switch</span><span class="v">Switching models reuses the same session — applied in place via <b>session/set_config_option</b>, prior context recalled.</span></div>
+      <div class="row"><span class="k">tool calls</span><span class="v">OpenCode's native <b>&lt;tool_call&gt;</b> XML parsed back into OpenAI function-call shape for Hermes's tool loop.</span></div>
+      <div class="row"><span class="k">model picking</span><span class="v"><b>ACP-native catalog probe</b> — <span class="mono">/model</span> shows what the opencode acp server actually validates, not a static list.</span></div>
+      <div class="row"><span class="k">fallbacks</span><span class="v">Works in Hermes's <b>fallback chain</b> — when the primary provider rate-limits, fall back through OpenCode models.</span></div>
+      <div class="row"><span class="k">free tier</span><span class="v">OpenCode <b>Go credits</b> cover free models — run Hermes on free, fall back to paid when exhausted.</span></div>
+      <div class="row"><span class="k">file safety</span><span class="v"><b>fs/read_text_file</b> + <b>fs/write_text_file</b> routed through Hermes's file-safety and redaction layers.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <div class="kicker">get going</div>
+    <h2>Quick start</h2>
+    <p class="sec-sub">Install OpenCode, copy the plugin into your Hermes checkout, apply the patch set, then pick a model.</p>
+    <div class="codebox">
+      <div class="bar"><span class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></span><span>install + configure</span></div>
+<pre><span class="c-cm"># 1. OpenCode CLI + auth</span>
+npm i -g opencode-ai@latest
+opencode auth login
+
+<span class="c-cm"># 2. Copy plugin into hermes-agent checkout</span>
+cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
+mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
+cp plugin/opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
+
+<span class="c-cm"># 3. Apply the integration patch set</span>
+cd ~/.hermes/hermes-agent
+git apply /path/to/hermes-opencode-acp/patches/*.patch
+
+<span class="c-cm"># 4. Pick a model — shows the live OpenCode catalog</span>
+hermes model
+<span class="c-cm"># OpenCode → OpenCode ACP → pick (e.g. opencode/deepseek-v4-flash)</span>
+
+<span class="c-cm"># 5. Restart and use</span>
+hermes gateway restart
+hermes chat</pre>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <div class="wrap">
+    <div class="kicker">configuration</div>
+    <h2>Point Hermes at OpenCode</h2>
+    <p class="sec-sub">Either run <span class="mono">hermes model</span> and pick from the live catalog, or set it directly.</p>
+    <div class="codebox">
+      <div class="bar"><span class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></span><span>config.yaml</span></div>
+<pre><span class="c-kw">model</span>:
+  <span class="c-s">provider</span>: opencode-acp
+  <span class="c-s">model</span>: opencode/deepseek-v4-flash
+  <span class="c-s">base_url</span>: acp://opencode
+  <span class="c-s">api_mode</span>: chat_completions
+
+<span class="c-cm"># fallback chain — free models first, paid when exhausted</span>
+<span class="c-kw">fallback_providers</span>:
+  - <span class="c-s">provider</span>: opencode-acp
+    <span class="c-s">model</span>: opencode/mimo-v2.5-free
+    <span class="c-s">base_url</span>: acp://opencode
+  - <span class="c-s">provider</span>: opencode-acp
+    <span class="c-s">model</span>: opencode/kimi-k2.6
+    <span class="c-s">base_url</span>: acp://opencode</pre>
+    </div>
+  </div>
+</section>
+
+<section id="upstream">
+  <div class="wrap">
+    <div class="kicker">upstream watch</div>
+    <h2>We're tracking hermes-agent's own ACP plans</h2>
+    <p class="sec-sub">Hermes core is planning a generalized ACP client — and OpenCode is already on their list.</p>
+    <div class="watch">
+      <div class="title">▲ NousResearch/hermes-agent#5257 — "Generalized ACP client for multi-agent CLI orchestration"</div>
+      <p>Core proposes a generic <span class="mono">ACPClient</span> + registry of 14 agents (Claude Code, Codex, Gemini, Cursor, Copilot, <b>OpenCode</b>, Kimi, Qwen…). When it lands, this patch set gets absorbed upstream and config stays compatible — <span class="mono">provider: opencode-acp</span> keeps working as-is. The migration checklist lives in <a href="https://github.com/jovylle/hermes-opencode-acp/blob/main/UPSTREAM.md">UPSTREAM.md</a>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- @SECTIONS@ -->
+
+<footer>
+  <div class="wrap">
+    <span>hermes-opencode-acp · MIT · built by <a href="https://jovylle.com">jovylle</a></span>
+    <span><a href="https://github.com/jovylle/hermes-opencode-acp">github.com/jovylle/hermes-opencode-acp</a></span>
+  </div>
+</footer>
+</body>
+</html>
