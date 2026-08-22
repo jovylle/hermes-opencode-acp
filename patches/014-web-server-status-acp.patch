@@ -1,0 +1,56 @@
+diff --git a/hermes_cli/web_server.py b/hermes_cli/web_server.py
+index 35f8f4229..d43b236e6 100644
+--- a/hermes_cli/web_server.py
++++ b/hermes_cli/web_server.py
+@@ -10427,11 +10427,11 @@ def _claude_code_only_status() -> Dict[str, Any]:
+ 
+ 
+ def _copilot_acp_status() -> Dict[str, Any]:
+-    """Status for copilot-acp — credentials are owned by the Copilot CLI.
++    """Status for copilot-acp -- credentials are owned by the Copilot CLI.
+ 
+     There is no cheap programmatic credential probe for the ACP subprocess, so
+     this is a read-only "managed by the Copilot CLI" card (like claude-code):
+-    Hermes never claims a login state it can't verify.
++    Hermes never claims a login state it cannot verify.
+     """
+     return {
+         "logged_in": False,
+@@ -10443,6 +10443,22 @@ def _copilot_acp_status() -> Dict[str, Any]:
+     }
+ 
+ 
++def _opencode_acp_status() -> Dict[str, Any]:
++    """Status for opencode-acp -- credentials are managed by OpenCode CLI.
++
++    Same pattern as copilot-acp: read-only card since OpenCode handles
++    its own provider authentication.
++    """
++    return {
++        "logged_in": False,
++        "source": "opencode_cli",
++        "source_label": "Managed by the OpenCode CLI",
++        "token_preview": None,
++        "expires_at": None,
++        "has_refresh_token": False,
++    }
++
++
+ # Explicit, hand-tuned OAuth/account provider cards. These carry the bits that
+ # can't be derived from the unified provider catalog: the OAuth ``flow`` shape,
+ # the per-provider ``status_fn``, the ``cli_command`` fallback, and curated
+@@ -10513,6 +10529,14 @@ _OAUTH_PROVIDER_CATALOG: tuple[Dict[str, Any], ...] = (
+         "docs_url": "https://docs.github.com/en/copilot",
+         "status_fn": _copilot_acp_status,
+     },
++    {
++        "id": "opencode-acp",
++        "name": "OpenCode (ACP)",
++        "flow": "external",
++        "cli_command": "opencode auth login",
++        "docs_url": "https://opencode.ai/docs/acp/",
++        "status_fn": _opencode_acp_status,
++    },
+     # ── Anthropic / Claude entries sit at the bottom: the API-key path
+     # first, then the subscription OAuth path (which only works with extra
+     # usage credits on top of a Claude Max plan — see disclaimer in name).

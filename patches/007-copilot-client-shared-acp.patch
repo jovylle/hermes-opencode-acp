@@ -1,0 +1,35 @@
+diff --git a/agent/copilot_acp_client.py b/agent/copilot_acp_client.py
+index 42be04395..a31eaf3c3 100644
+--- a/agent/copilot_acp_client.py
++++ b/agent/copilot_acp_client.py
+@@ -188,6 +188,13 @@ def _permission_denied(message_id: Any) -> dict[str, Any]:
+     }
+ 
+ 
++def _estimate_tokens(text: str) -> int:
++    """Estimate token count from text (roughly 4 chars per token for English)."""
++    if not text:
++        return 0
++    return max(1, len(text) // 4)
++
++
+ def _format_messages_as_prompt(
+     messages: list[dict[str, Any]],
+     model: str | None = None,
+@@ -531,10 +538,13 @@ class CopilotACPClient:
+ 
+         tool_calls, cleaned_text = _extract_tool_calls_from_text(response_text)
+ 
++        # Estimate token usage (ACP protocol doesn't return usage data)
++        prompt_tokens = _estimate_tokens(prompt_text)
++        completion_tokens = _estimate_tokens(cleaned_text) + _estimate_tokens(reasoning_text)
+         usage = SimpleNamespace(
+-            prompt_tokens=0,
+-            completion_tokens=0,
+-            total_tokens=0,
++            prompt_tokens=prompt_tokens,
++            completion_tokens=completion_tokens,
++            total_tokens=prompt_tokens + completion_tokens,
+             prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+         )
+         assistant_message = SimpleNamespace(

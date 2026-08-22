@@ -1,0 +1,14 @@
+diff --git a/hermes_cli/setup.py b/hermes_cli/setup.py
+index 3c65981cb..182f17aa3 100644
+--- a/hermes_cli/setup.py
++++ b/hermes_cli/setup.py
+@@ -74,6 +74,9 @@ _DEFAULT_PROVIDER_MODELS = {
+     "copilot-acp": [
+         "copilot-acp",
+     ],
++    "opencode-acp": [
++        "opencode-acp",
++    ],
+     "copilot": [
+         "gpt-5.4",
+         "gpt-5.4-mini",

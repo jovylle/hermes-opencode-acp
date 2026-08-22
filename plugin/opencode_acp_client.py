@@ -40,6 +40,16 @@ _DEFAULT_TIMEOUT_SECONDS = 900.0
 
 _TOOL_CALL_BLOCK_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 _TOOL_CALL_JSON_RE = re.compile(r"\{\s*\"id\"\s*:\s*\"[^\"]+\"\s*,\s*\"type\"\s*:\s*\"function\"\s*,\s*\"function\"\s*:\s*\{.*?\}\s*\}", re.DOTALL)
+# OpenCode's OWN tool-call serialization (what `opencode acp` actually emits):
+#   <tool_call>
+#   <parameter=arguments>{"city":"Tokyo"}</parameter>
+#   <parameter=name>get_weather</parameter>
+#   </function>            <- stray closer, opencode emits it without an opener
+#   </tool_call>
+# The <parameter=name>/<parameter=arguments> tags may appear in either order.
+_TOOL_CALL_OPENCODE_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+_OPENCODE_PARAM_NAME_RE = re.compile(r"<parameter=name>(.*?)</parameter>", re.DOTALL)
+_OPENCODE_PARAM_ARGS_RE = re.compile(r"<parameter=arguments>(.*?)</parameter>", re.DOTALL)
 
 
 def _resolve_command() -> str:
@@ -131,12 +141,12 @@ def _format_messages_as_prompt(
     """Format the FULL conversation as a single ACP prompt.
 
     Used for first-turn / cold-start where OpenCode has no session context.
-    For persistent sessions, use _extract_last_user_message() instead.
+    For persistent sessions, use _format_incremental_prompt() instead.
     """
     sections: list[str] = [
         "You are being used as the active ACP agent backend for Hermes.",
         "Use ACP capabilities to complete tasks.",
-        "IMPORTANT: If you take an action with a tool, you MUST output tool calls using <tool_call>{...}</tool_call> blocks with JSON exactly in OpenAI function-call shape.",
+        "IMPORTANT: If you take an action with a tool, you MUST output a tool call as a <tool_call> block — EITHER OpenAI shape (<tool_call>{...json...}</tool_call> with id/type/function{name,arguments}) OR your native format (<tool_call><parameter=name>fn</parameter><parameter=arguments>{json}</parameter></tool_call>). The host parses both.",
         "If no tool is needed, answer normally.",
     ]
     if model:
@@ -163,14 +173,29 @@ def _format_messages_as_prompt(
         if tool_specs:
             sections.append(
                 "Available tools (OpenAI function schema). "
-                "When using a tool, emit ONLY <tool_call>{...}</tool_call> with one JSON object "
-                "containing id/type/function{name,arguments}. arguments must be a JSON string.\n"
+                "When using a tool, emit ONLY a <tool_call> block: "
+                "<tool_call>{json}</tool_call> with id/type/function{name,arguments} "
+                "(arguments must be a JSON string), or your native "
+                "<tool_call><parameter=name>fn</parameter><parameter=arguments>{json}</parameter></tool_call>.\n"
                 + json.dumps(tool_specs, ensure_ascii=False)
             )
 
     if tool_choice is not None:
         sections.append(f"Tool choice hint: {json.dumps(tool_choice, ensure_ascii=False)}")
 
+    transcript = _render_transcript(messages)
+    if transcript:
+        sections.append("Conversation transcript:\n\n" + transcript)
+    sections.append("Continue the conversation from the latest user request.")
+    return "\n\n".join(section.strip() for section in sections if section and section.strip())
+
+
+def _render_transcript(messages: list[dict[str, Any]]) -> str:
+    """Render a message list as a labeled transcript for ACP prompting.
+
+    Assistant tool calls are rendered inline so OpenCode can see which
+    function it requested even when the content is empty.
+    """
     transcript: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
@@ -178,12 +203,26 @@ def _format_messages_as_prompt(
         role = str(message.get("role") or "unknown").strip().lower()
         if role not in {"system", "user", "assistant", "tool"}:
             role = "context"
-
-        content = message.get("content")
-        rendered = _render_message_content(content)
-        if not rendered:
+        rendered = _render_message_content(message.get("content"))
+        parts: list[str] = []
+        if rendered:
+            parts.append(rendered)
+        if role == "assistant":
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                    if not isinstance(fn, dict):
+                        continue
+                    name = fn.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    args = fn.get("arguments")
+                    if not isinstance(args, str):
+                        args = json.dumps(args, ensure_ascii=False)
+                    parts.append(f"Tool call: {name}({args})")
+        if not parts:
             continue
-
         label = {
             "system": "System",
             "user": "User",
@@ -191,32 +230,31 @@ def _format_messages_as_prompt(
             "tool": "Tool",
             "context": "Context",
         }.get(role, role.title())
-        transcript.append(f"{label}:\n{rendered}")
-
-    if transcript:
-        sections.append("Conversation transcript:\n\n" + "\n\n".join(transcript))
-    sections.append("Continue the conversation from the latest user request.")
-    return "\n\n".join(section.strip() for section in sections if section and section.strip())
+        transcript.append(f"{label}:\n" + "\n".join(parts))
+    return "\n\n".join(transcript)
 
 
-def _extract_last_user_message(messages: list[dict[str, Any]]) -> str:
-    """Extract the last user message text for incremental ACP prompting.
+def _format_incremental_prompt(messages: list[dict[str, Any]]) -> str:
+    """Build the minimal prompt for a persistent ACP session.
 
-    When a persistent session already has conversation context, we only
-    need to send the NEW user message — OpenCode remembers the rest.
-    Falls back to full transcript if no user message is found.
+    - No tool roundtrip pending: return just the latest user text — the
+      OpenCode session already holds everything before it.
+    - Tool roundtrip pending (assistant tool_calls and/or tool results
+      AFTER the latest user message): return a compact transcript of the
+      tail so OpenCode sees what it called and what the tool returned.
+    - No user message at all: return "" so the caller falls back to the
+      full-conversation format.
     """
-    for msg in reversed(messages):
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role") or "").strip().lower()
-        if role != "user":
-            continue
-        rendered = _render_message_content(msg.get("content"))
-        if rendered:
-            return rendered
-    # No user message found — fall back to full format.
-    return ""
+    last_user_idx = -1
+    for i, message in enumerate(messages):
+        if isinstance(message, dict) and str(message.get("role") or "").lower() == "user":
+            last_user_idx = i
+    if last_user_idx == -1:
+        return ""
+    tail = messages[last_user_idx:]
+    if len(tail) == 1:
+        return _render_message_content(tail[0].get("content"))
+    return _render_transcript(tail)
 
 
 def _render_message_content(content: Any) -> str:
@@ -310,26 +348,25 @@ def _extract_tool_calls_from_text(text: str) -> tuple[list[ChatCompletionMessage
     extracted: list[ChatCompletionMessageToolCall] = []
     consumed_spans: list[tuple[int, int]] = []
 
-    def _try_add_tool_call(raw_json: str) -> None:
+    def _try_add_tool_call(raw_json: str) -> bool:
         try:
             obj = json.loads(raw_json)
         except Exception:
-            return
+            return False
         if not isinstance(obj, dict):
-            return
+            return False
         fn = obj.get("function")
         if not isinstance(fn, dict):
-            return
+            return False
         fn_name = fn.get("name")
         if not isinstance(fn_name, str) or not fn_name.strip():
-            return
+            return False
         fn_args = fn.get("arguments", "{}")
         if not isinstance(fn_args, str):
             fn_args = json.dumps(fn_args, ensure_ascii=False)
         call_id = obj.get("id")
         if not isinstance(call_id, str) or not call_id.strip():
             call_id = f"acp_call_{len(extracted)+1}"
-
         extracted.append(
             _build_openai_tool_call(
                 call_id=call_id,
@@ -337,16 +374,41 @@ def _extract_tool_calls_from_text(text: str) -> tuple[list[ChatCompletionMessage
                 arguments=fn_args,
             )
         )
+        return True
 
+    def _try_add_opencode_call(block: str) -> bool:
+        """Parse one opencode-native <tool_call>…</tool_call> block."""
+        name_m = _OPENCODE_PARAM_NAME_RE.search(block)
+        fn_name = name_m.group(1).strip() if name_m else ""
+        if not fn_name:
+            return False
+        args_m = _OPENCODE_PARAM_ARGS_RE.search(block)
+        fn_args = args_m.group(1).strip() if args_m else "{}"
+        call_id = f"acp_call_{len(extracted)+1}"
+        extracted.append(
+            _build_openai_tool_call(
+                call_id=call_id,
+                name=fn_name,
+                arguments=fn_args,
+            )
+        )
+        return True
+
+    # Pass 1: OpenAI JSON shape — <tool_call>{...}</tool_call>
     for m in _TOOL_CALL_BLOCK_RE.finditer(text):
-        raw = m.group(1)
-        _try_add_tool_call(raw)
-        consumed_spans.append((m.start(), m.end()))
+        if _try_add_tool_call(m.group(1)):
+            consumed_spans.append((m.start(), m.end()))
 
+    # Pass 1b: bare OpenAI-shape JSON object without the wrapper tags
     if not extracted:
         for m in _TOOL_CALL_JSON_RE.finditer(text):
-            raw = m.group(0)
-            _try_add_tool_call(raw)
+            if _try_add_tool_call(m.group(0)):
+                consumed_spans.append((m.start(), m.end()))
+
+    # Pass 2: opencode-native <parameter=name>/<parameter=arguments> XML.
+    # Runs even when pass 1 found calls (a mixed transcript can have both).
+    for m in _TOOL_CALL_OPENCODE_RE.finditer(text):
+        if _try_add_opencode_call(m.group(1)):
             consumed_spans.append((m.start(), m.end()))
 
     if not consumed_spans:
@@ -475,7 +537,7 @@ class OpenCodeACPClient:
         # latest user message — OpenCode's session context has the rest.
         # For cold starts, send the full transcript (includes system prompt).
         if self._initialized and self._session_id:
-            incremental = _extract_last_user_message(messages or [])
+            incremental = _format_incremental_prompt(messages or [])
             if incremental:
                 prompt_text = incremental
             else:

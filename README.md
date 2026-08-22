@@ -80,6 +80,18 @@ cd ~/.hermes/hermes-agent
 git apply /path/to/hermes-opencode-acp/patches/*.patch
 ```
 
+The `patches/` directory covers **all 14 integration points** (auth, model picker,
+runtime helpers, auxiliary client, agent init, conversation loop, shared copilot
+client, CLI dispatch, model switch, model catalog, provider overlay, runtime
+provider, setup defaults, web dashboard). Keep them in sync with your local
+edits by regenerating after any change:
+
+```bash
+# Regenerate one patch from the live (patched) tree:
+cd ~/.hermes/hermes-agent
+git diff -- <path/to/file.py> > /path/to/hermes-opencode-acp/patches/NNN-name.patch
+```
+
 ### 4. Configure
 
 ```bash

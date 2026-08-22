@@ -1,0 +1,15 @@
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index ab8e60b6d..1ecc02e59 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -2992,8 +2992,9 @@ def run_conversation(
+                 # stream.  Mirror the ACP exclusion used for Responses
+                 # API upgrade (lines ~1083-1085).
+                 elif (
+-                    agent.provider in {"copilot-acp"}
++                    agent.provider in {"copilot-acp", "opencode-acp"}
+                     or str(agent.base_url or "").lower().startswith("acp://copilot")
++                    or str(agent.base_url or "").lower().startswith("acp://opencode")
+                     or str(agent.base_url or "").lower().startswith("acp+tcp://")
+                 ):
+                     _use_streaming = False

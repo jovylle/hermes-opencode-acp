@@ -1,5 +1,5 @@
 diff --git a/hermes_cli/auth.py b/hermes_cli/auth.py
-index 666ef4150..03f7dc593 100644
+index 666ef4150..08b0dc44d 100644
 --- a/hermes_cli/auth.py
 +++ b/hermes_cli/auth.py
 @@ -305,6 +305,13 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
@@ -50,7 +50,7 @@ index 666ef4150..03f7dc593 100644
 +            or "opencode"
 +        )
 +        raw_args = os.getenv("HERMES_OPENCODE_ACP_ARGS", "").strip()
-+        args = shlex.split(raw_args) if raw_args else ["acp", "--stdio"]
++        args = shlex.split(raw_args) if raw_args else ["acp"]
 +    else:
 +        command = "unknown"
 +        args = []

@@ -1,0 +1,49 @@
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index 91129db7b..d0689c972 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -340,6 +340,9 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
+     "copilot-acp": [
+         "copilot-acp",
+     ],
++    "opencode-acp": [
++        "opencode-acp",
++    ],
+     "copilot": [
+         "gpt-5.4",
+         "gpt-5.4-mini",
+@@ -1170,6 +1173,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
+     ProviderEntry("nvidia",         "NVIDIA NIM",               "NVIDIA NIM (Nemotron models via build.nvidia.com or local NIM)"),
+     ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (Uses GITHUB_TOKEN or gh auth token)"),
+     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (Spawns copilot --acp --stdio)"),
++    ProviderEntry("opencode-acp",   "OpenCode ACP",             "OpenCode ACP (Spawns opencode acp via Agent Client Protocol)"),
+     ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers"),
+     ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Native Gemini API)"),
+     ProviderEntry("vertex",         "Google Vertex AI",         "Google Vertex AI (Gemini via GCP; OAuth2 service account or ADC, GCP billing/quotas)"),
+@@ -1247,7 +1251,7 @@ PROVIDER_GROUPS: dict[str, tuple[str, str, list[str]]] = {
+     "google":   ("Google Gemini",   "Google AI Studio (API key)",                     ["gemini"]),
+     "openai":   ("OpenAI",          "ChatGPT/Codex subscription or direct OpenAI API", ["openai-codex", "openai-api"]),
+     "qwen":     ("Qwen",            "Qwen Cloud / DashScope, Coding Plan & Qwen CLI OAuth", ["alibaba", "alibaba-coding-plan", "qwen-oauth"]),
+-    "opencode": ("OpenCode",        "Zen pay-as-you-go or Go subscription",            ["opencode-zen", "opencode-go"]),
++    "opencode": ("OpenCode",        "Zen pay-as-you-go, Go subscription, or ACP",      ["opencode-zen", "opencode-go", "opencode-acp"]),
+     "copilot":  ("GitHub Copilot",  "GitHub token API or copilot --acp process",       ["copilot", "copilot-acp"]),
+ }
+ 
+@@ -1333,6 +1337,8 @@ _PROVIDER_ALIASES = {
+     "github-model": "copilot",
+     "github-copilot-acp": "copilot-acp",
+     "copilot-acp-agent": "copilot-acp",
++    "opencode-acp-agent": "opencode-acp",
++    "oc-acp": "opencode-acp",
+     "google": "gemini",
+     "google-gemini": "gemini",
+     "google-ai-studio": "gemini",
+@@ -3639,7 +3645,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False)
+         except Exception:
+             access_token = None
+         return get_codex_model_ids(access_token=access_token)
+-    if normalized in {"copilot", "copilot-acp"}:
++    if normalized in {"copilot", "copilot-acp", "opencode-acp"}:
+         try:
+             live = _fetch_github_models(_resolve_copilot_catalog_api_key())
+             if live:
