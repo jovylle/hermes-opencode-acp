@@ -1,9 +1,11 @@
 """OpenCode-compatible shim that forwards Hermes requests to `opencode acp`.
 
 This adapter lets Hermes treat the OpenCode ACP server as a chat-style
-backend. Each request starts a short-lived ACP session, sends the formatted
-conversation as a single prompt, collects text chunks, and converts the result
-back into the minimal shape Hermes expects from an OpenAI client.
+backend. It keeps ONE persistent ACP process + session per (command, args,
+cwd), sends the formatted conversation as prompts, collects text chunks,
+and converts the result back into the minimal shape Hermes expects from an
+OpenAI client.  Model switches reuse the same session and apply the new
+model in place via session/set_config_option (1:1 session continuation).
 
 Wire protocol: JSON-RPC 2.0 over stdio (Agent Client Protocol v1).
 OpenCode's `opencode acp` speaks the same protocol as Copilot's
