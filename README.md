@@ -53,39 +53,60 @@ OpenCode ACP models work in Hermes's fallback chain. If your primary model is ra
 
 ### 1. Install OpenCode CLI
 
-```bash
-# macOS
-brew install anomalyco/tap/opencode
+Skip if already installed.
 
-# npm
-npm i -g opencode-ai@latest
+```bash
+which opencode && opencode run 'hello' && echo "OpenCode OK — skip to step 2"
+
+# Install (pick one):
+brew install anomalyco/tap/opencode   # macOS
+npm i -g opencode-ai@latest          # npm
 
 # Verify
 opencode run 'hello'
 ```
 
-### 2. Set up OpenCode auth
+### 2. Authenticate OpenCode
+
+Skip if already authenticated (`opencode providers` shows your providers).
 
 ```bash
 opencode auth login
-# or set provider env vars (OPENROUTER_API_KEY, etc.)
+# or set provider env vars (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, etc.)
 ```
 
-### 3. Install the plugin
+### 3. Clone this repo
+
+Skip if already cloned.
 
 ```bash
-# Clone
+ls ~/hermes-opencode-acp/README.md && echo "Repo exists — skip to step 4"
+
 git clone https://github.com/jovylle/hermes-opencode-acp.git
 cd hermes-opencode-acp
+```
 
-# Copy plugin
-cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
+### 4. Copy plugin files into Hermes
+
+Skip if already installed (check `ls ~/.hermes/hermes-agent/agent/opencode_acp_client.py`).
+
+```bash
+REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
+
+cp "$REPO/plugin/opencode_acp_client.py" ~/.hermes/hermes-agent/agent/
 mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
-cp plugin/opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
+cp "$REPO/plugin/opencode_acp_provider.py" ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
+```
 
-# Apply patches
+### 5. Apply patches
+
+Skip if already patched (check `grep -q opencode_acp ~/.hermes/hermes-agent/agent/agent.py && echo patched`).
+
+```bash
+REPO=~/hermes-opencode-acp
+
 cd ~/.hermes/hermes-agent
-git apply /path/to/hermes-opencode-acp/patches/*.patch
+git apply "$REPO/patches/"*.patch
 ```
 
 The `patches/` directory covers **all 14 integration points** (auth, model picker,
@@ -95,24 +116,23 @@ provider, setup defaults, web dashboard). Keep them in sync with your local
 edits by regenerating after any change:
 
 ```bash
-# Regenerate one patch from the live (patched) tree:
 cd ~/.hermes/hermes-agent
-git diff -- <path/to/file.py> > /path/to/hermes-opencode-acp/patches/NNN-name.patch
+git diff -- <path/to/file.py> > "$REPO/patches/NNN-name.patch"
 ```
 
-### 4. Configure
+### 6. Configure Hermes to use OpenCode ACP
 
 ```bash
 # Interactive — shows 200+ models from OpenCode
 hermes model
 # Pick: OpenCode → OpenCode ACP → select model
 
-# Add to fallback chain
+# Optional: add to fallback chain
 hermes fallback add
 # Pick: OpenCode ACP → pick a model
 ```
 
-### 5. Restart and use
+### 7. Restart and use
 
 ```bash
 hermes gateway restart

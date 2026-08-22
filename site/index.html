@@ -164,18 +164,20 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
     <p class="sec-sub">Install OpenCode, copy the plugin into your Hermes checkout, apply the patch set, then pick a model.</p>
     <div class="codebox">
       <div class="bar"><span class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></span><span>install + configure</span></div>
-<pre><span class="c-cm"># 1. OpenCode CLI + auth</span>
+<pre><span class="c-cm"># 1. OpenCode CLI + auth (skip if already installed)</span>
 npm i -g opencode-ai@latest
 opencode auth login
 
-<span class="c-cm"># 2. Copy plugin into hermes-agent checkout</span>
+<span class="c-cm"># 2. Clone this repo</span>
+git clone https://github.com/jovylle/hermes-opencode-acp.git
+cd hermes-opencode-acp
+
+<span class="c-cm"># 3. Copy plugin + apply patches (skip if already patched)</span>
 cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
 mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
 cp plugin/opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
-
-<span class="c-cm"># 3. Apply the integration patch set</span>
 cd ~/.hermes/hermes-agent
-git apply /path/to/hermes-opencode-acp/patches/*.patch
+git apply $(pwd)/../../hermes-opencode-acp/patches/*.patch
 
 <span class="c-cm"># 4. Pick a model — shows the live OpenCode catalog</span>
 hermes model

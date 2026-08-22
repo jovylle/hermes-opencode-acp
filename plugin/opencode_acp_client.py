@@ -136,23 +136,37 @@ def _permission_denied(message_id: Any) -> dict[str, Any]:
 
 
 def _estimate_tokens(text: str) -> int:
-    """Estimate token count from text (roughly 4 chars per token for English)."""
+    """Estimate token count from text.
+
+    - English/Latin: ~1.3 tokens per whitespace-delimited word.
+    - CJK runs: ~1 token per character (subword tokenizers emit ~1 token
+      per CJK char; a slight overestimate is safer than an underestimate —
+      undercounting is what causes mid-turn context overruns and cut-off
+      responses).
+    """
     if not text:
         return 0
-    return max(1, len(text) // 4)
+    total = 0
+    cjk_total = 0
+    word_count = 0
+    for word in text.split():
+        cjk_in_word = sum(1 for ch in word if "\u4e00" <= ch <= "\u9fff")
+        cjk_total += cjk_in_word
+        stripped = word.strip(",.;:!?()[]{}<>\"'`~@#$%^&*_-+=|\\/")
+        if stripped and len(stripped) > cjk_in_word:
+            word_count += 1
+    total += cjk_total  # ~1 token per CJK char
+    total += int(word_count * 1.3)  # Latin words ~1.3 tokens each
+    return max(1, total)
 
 
-def _format_messages_as_prompt(
-    messages: list[dict[str, Any]],
+def _build_system_sections(
     model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
-) -> str:
-    """Format the FULL conversation as a single ACP prompt.
-
-    Used for first-turn / cold-start where OpenCode has no session context.
-    For persistent sessions, use _format_incremental_prompt() instead.
-    """
+) -> list[str]:
+    """Build the ACP role/tool system sections shared by cold-start and
+    incremental prompts."""
     sections: list[str] = [
         "You are being used as the active ACP agent backend for Hermes.",
         "Use ACP capabilities to complete tasks.",
@@ -192,6 +206,21 @@ def _format_messages_as_prompt(
 
     if tool_choice is not None:
         sections.append(f"Tool choice hint: {json.dumps(tool_choice, ensure_ascii=False)}")
+    return sections
+
+
+def _format_messages_as_prompt(
+    messages: list[dict[str, Any]],
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any = None,
+) -> str:
+    """Format the FULL conversation as a single ACP prompt.
+
+    Used for first-turn / cold-start where OpenCode has no session context.
+    For persistent sessions, use _format_incremental_prompt() instead.
+    """
+    sections: list[str] = _build_system_sections(model, tools, tool_choice)
 
     transcript = _render_transcript(messages)
     if transcript:
@@ -244,14 +273,26 @@ def _render_transcript(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(transcript)
 
 
-def _format_incremental_prompt(messages: list[dict[str, Any]]) -> str:
+def _format_incremental_prompt(
+    messages: list[dict[str, Any]],
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any = None,
+) -> str:
     """Build the minimal prompt for a persistent ACP session.
 
-    - No tool roundtrip pending: return just the latest user text — the
-      OpenCode session already holds everything before it.
+    Always prepends the ACP role instructions, model hint, and tool
+    definitions (via _build_system_sections) so OpenCode never loses
+    its ACP context across turns — only its session message history is
+    trusted to persist.
+
+    - No tool roundtrip pending: return the system sections plus just the
+      latest user text — the OpenCode session already holds everything
+      before it.
     - Tool roundtrip pending (assistant tool_calls and/or tool results
-      AFTER the latest user message): return a compact transcript of the
-      tail so OpenCode sees what it called and what the tool returned.
+      AFTER the latest user message): return the system sections plus a
+      compact transcript of the tail so OpenCode sees what it called and
+      what the tool returned.
     - No user message at all: return "" so the caller falls back to the
       full-conversation format.
     """
@@ -263,8 +304,15 @@ def _format_incremental_prompt(messages: list[dict[str, Any]]) -> str:
         return ""
     tail = messages[last_user_idx:]
     if len(tail) == 1:
-        return _render_message_content(tail[0].get("content"))
-    return _render_transcript(tail)
+        tail_text = _render_message_content(tail[0].get("content"))
+    else:
+        tail_text = _render_transcript(tail)
+    if not tail_text:
+        return ""
+    sections = _build_system_sections(model, tools, tool_choice)
+    sections.append("Latest conversation:\n\n" + tail_text)
+    sections.append("Continue the conversation from the latest user request.")
+    return "\n\n".join(section.strip() for section in sections if section and section.strip())
 
 
 def _render_message_content(content: Any) -> str:
@@ -554,7 +602,12 @@ class OpenCodeACPClient:
         # latest user message — OpenCode's session context has the rest.
         # For cold starts, send the full transcript (includes system prompt).
         if self._initialized and self._session_id:
-            incremental = _format_incremental_prompt(messages or [])
+            incremental = _format_incremental_prompt(
+                messages or [],
+                model=model,
+                tools=tools,
+                tool_choice=tool_choice,
+            )
             if incremental:
                 prompt_text = incremental
             else:
@@ -902,8 +955,17 @@ class OpenCodeACPClient:
                 chunk_text = str(content.get("text") or "")
             if kind == "agent_message_chunk" and chunk_text and text_parts is not None:
                 text_parts.append(chunk_text)
-            elif kind == "agent_thought_chunk" and chunk_text and reasoning_parts is not None:
-                reasoning_parts.append(chunk_text)
+            elif kind == "agent_thought_chunk":
+                if chunk_text and reasoning_parts is not None:
+                    reasoning_parts.append(chunk_text)
+                # reasoning_parts is None → caller didn't ask for reasoning;
+                # drop silently (preserves old behavior).
+            elif kind and chunk_text and text_parts is not None:
+                # Unknown chunk type with text content — include it rather
+                # than silently dropping.  Covers tool_call_chunk,
+                # tool_result_chunk, and any future chunk types OpenCode
+                # may add, so mid-stream content is never lost.
+                text_parts.append(chunk_text)
             return True
 
         if process.stdin is None:

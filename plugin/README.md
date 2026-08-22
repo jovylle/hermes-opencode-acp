@@ -26,14 +26,17 @@ OpenCode handles model selection and plugin fallbacks — Hermes drives the ACP 
 
 ## Install
 
-Copy or symlink the `opencode-acp/` directory into your Hermes plugins:
-
 ```bash
-# Option 1: Symlink (development)
-ln -s /path/to/opencode-acp ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
+REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
 
-# Option 2: Copy
-cp -r opencode-acp ~/.hermes/hermes-agent/plugins/model-providers/
+# Copy plugin files into Hermes
+cp "$REPO/plugin/opencode_acp_client.py" ~/.hermes/hermes-agent/agent/
+mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
+cp "$REPO/plugin/opencode_acp_provider.py" ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
+
+# Apply patches (skip if already patched)
+cd ~/.hermes/hermes-agent
+git apply "$REPO/patches/"*.patch
 ```
 
 ## Configure
