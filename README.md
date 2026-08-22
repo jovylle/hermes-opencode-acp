@@ -2,7 +2,7 @@
 name: hermes-opencode-acp
 description: OpenCode ACP provider for Hermes Agent — use OpenCode as a coding agent backend
 ---
-
+![Screenshot](./public/images/image.png)
 # hermes-opencode-acp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
