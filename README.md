@@ -86,41 +86,23 @@ git clone https://github.com/jovylle/hermes-opencode-acp.git
 cd hermes-opencode-acp
 ```
 
-### 4. Copy plugin files into Hermes
+### 4. Run the installer
 
-Skip if already installed (check `ls ~/.hermes/hermes-agent/agent/opencode_acp_client.py`).
-
-```bash
-REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
-
-cp "$REPO/plugin/opencode_acp_client.py" ~/.hermes/hermes-agent/agent/
-mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
-cp "$REPO/plugin/opencode_acp_provider.py" ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
-```
-
-### 5. Apply patches
-
-Skip if already patched (check `grep -q opencode_acp ~/.hermes/hermes-agent/agent/agent.py && echo patched`).
+Skip if already installed (check `ls ~/.hermes/plugins/model-providers/opencode-acp/__init__.py`).
 
 ```bash
-REPO=~/hermes-opencode-acp
-
-cd ~/.hermes/hermes-agent
-git apply "$REPO/patches/"*.patch
+REPO=/Volumes/DevSSD/fore/lab/hermes-opencode-acp  # adjust if cloned elsewhere
+"$REPO/install-hermes-core-patch.sh"
 ```
 
-The `patches/` directory covers **all 14 integration points** (auth, model picker,
-runtime helpers, auxiliary client, agent init, conversation loop, shared copilot
-client, CLI dispatch, model switch, model catalog, provider overlay, runtime
-provider, setup defaults, web dashboard). Keep them in sync with your local
-edits by regenerating after any change:
+The script does two things:
 
-```bash
-cd ~/.hermes/hermes-agent
-git diff -- <path/to/file.py> > "$REPO/patches/NNN-name.patch"
-```
+1. **Installs the provider plugin** to `~/.hermes/plugins/model-providers/opencode-acp/` — this lives OUTSIDE the Hermes git checkout, so `hermes update` never touches or stashes it.
+2. **Applies the core-tree routing patch** (`patches/hermes-core-v<ver>.patch`) to `~/.hermes/hermes-agent` as *uncommitted* working-tree changes. Never commit them on `main`: the updater hard-resets a diverged main and would destroy committed work, while uncommitted changes ride its normal autostash flow.
 
-### 6. Configure Hermes to use OpenCode ACP
+It is idempotent — safe to re-run any time.
+
+### 5. Configure Hermes to use OpenCode ACP
 
 ```bash
 # Interactive — shows 200+ models from OpenCode
@@ -132,7 +114,7 @@ hermes fallback add
 # Pick: OpenCode ACP → pick a model
 ```
 
-### 7. Restart and use
+### 6. Restart and use
 
 ```bash
 hermes gateway restart
@@ -213,6 +195,54 @@ Hermes ──ACP JSON-RPC──> OpenCode ──HTTP──> LLM Provider
 | Auth | Copilot CLI login | OpenCode auth |
 | Model selection | GitHub Copilot catalog | OpenCode's config |
 | Session persistence | Per-turn (new process) | Persistent (same process) |
+
+## After a Hermes update
+
+`hermes update` is safe with this setup — but the core-tree patch must be
+re-applied afterwards, and if upstream changed nearby code, regenerated.
+
+```bash
+hermes update
+
+# 1. Re-apply (no-op if the tree is already patched)
+/Volumes/DevSSD/fore/lab/hermes-opencode-acp/install-hermes-core-patch.sh
+
+# 2. Restart the gateway from a separate shell
+hermes gateway restart && hermes gateway status
+
+# 3. Verify the fallback provider resolves
+hermes chat -q "say ok" -Q --max-turns 1
+```
+
+**If step 1 fails** ("error: patch does not apply" or conflict markers):
+upstream shipped changes that collide with the patch. Regenerate it:
+
+```bash
+cd ~/.hermes/hermes-agent
+git status --porcelain          # see which files have conflicts/dirty state
+git checkout -- .               # discard broken partial apply
+rm -f agent/opencode_acp_client.py
+```
+
+Then re-apply by hand onto the new version:
+
+```bash
+cd /Volumes/DevSSD/fore/lab/hermes-opencode-acp
+cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
+cd ~/.hermes/hermes-agent
+
+# re-do each routing edit from the old patch; the hunks that still apply:
+git apply --3way "$OLD_REPO/patches/hermes-core-v0.20.5.patch" || true
+
+# resolve conflicts in an editor (search for <<<<<<<), then regenerate:
+git diff > /Volumes/DevSSD/fore/lab/hermes-opencode-acp/patches/hermes-core-v<NEWVER>.patch
+git diff --cached >> /Volumes/DevSSD/fore/lab/hermes-opencode-acp/patches/hermes-core-v<NEWVER>.patch
+git reset -q                    # unstage everything — keep main's index clean
+```
+
+Delete stale `patches/hermes-core-v<oldver>.patch` once the new one verifies.
+The plugin dir (`~/.hermes/plugins/model-providers/opencode-acp/`) needs no
+attention on updates — updates never touch `$HERMES_HOME`.
 
 ## Troubleshooting
 
