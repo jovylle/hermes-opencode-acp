@@ -138,6 +138,11 @@ def _permission_denied(message_id: Any) -> dict[str, Any]:
 def _estimate_tokens(text: str) -> int:
     """Estimate token count from text.
 
+    Fallback only — the preferred source is the real usage the ACP server
+    returns in the session/prompt result (``result.usage``), which opencode
+    acp fills in. Estimates are used when that block is absent (older
+    servers, Copilot ACP).
+
     - English/Latin: ~1.3 tokens per whitespace-delimited word.
     - CJK runs: ~1 token per character (subword tokenizers emit ~1 token
       per CJK char; a slight overestimate is safer than an underestimate —
@@ -158,6 +163,45 @@ def _estimate_tokens(text: str) -> int:
     total += cjk_total  # ~1 token per CJK char
     total += int(word_count * 1.3)  # Latin words ~1.3 tokens each
     return max(1, total)
+
+
+def _parse_acp_usage(raw: Any) -> dict[str, int] | None:
+    """Normalize the ACP session/prompt result's usage block.
+
+    opencode acp (>=1.18.20) reports real usage after each prompt:
+      {"inputTokens": ..., "outputTokens": ..., "totalTokens": ...,
+       "cachedReadTokens": ...}
+    Returned as OpenAI-style buckets so Hermes' usage accounting sees the
+    server's actual counts (input includes cached tokens, matching the
+    OpenAI prompt_tokens contract). Returns None when the block is missing
+    or all-zero — callers then fall back to _estimate_tokens().
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def _to_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = _to_int(raw.get("inputTokens"))
+    output_tokens = _to_int(raw.get("outputTokens"))
+    cached_tokens = _to_int(raw.get("cachedReadTokens"))
+    total_tokens = _to_int(raw.get("totalTokens"))
+    if input_tokens <= 0 and output_tokens <= 0:
+        return None
+    # totalTokens as reported by opencode includes cached reads
+    # (input + output + cached). Keep the OpenAI shape: prompt (incl.
+    # cached) + completion, with cached broken out separately.
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cached_tokens": cached_tokens,
+    }
 
 
 def _build_system_sections(
@@ -669,21 +713,31 @@ class OpenCodeACPClient:
             # it right after session/new.
             self._acp_model = requested
 
-        response_text, reasoning_text = self._run_prompt(
+        response_text, reasoning_text, acp_usage = self._run_prompt(
             prompt_text,
             timeout_seconds=_effective_timeout,
         )
 
         tool_calls, cleaned_text = _extract_tool_calls_from_text(response_text)
 
-        # Estimate token usage (ACP protocol doesn't return usage data)
-        prompt_tokens = _estimate_tokens(prompt_text)
-        completion_tokens = _estimate_tokens(cleaned_text) + _estimate_tokens(reasoning_text)
+        # Prefer the REAL token usage the ACP server reports in the
+        # session/prompt result (opencode acp fills it in). Fall back to
+        # character-based estimation only when it is absent.
+        if acp_usage is not None:
+            prompt_tokens = acp_usage["prompt_tokens"]
+            completion_tokens = acp_usage["completion_tokens"]
+            total_tokens = acp_usage["total_tokens"]
+            cached_tokens = acp_usage["cached_tokens"]
+        else:
+            prompt_tokens = _estimate_tokens(prompt_text)
+            completion_tokens = _estimate_tokens(cleaned_text) + _estimate_tokens(reasoning_text)
+            total_tokens = prompt_tokens + completion_tokens
+            cached_tokens = 0
         usage = SimpleNamespace(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            total_tokens=total_tokens,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=cached_tokens),
         )
         assistant_message = SimpleNamespace(
             content=cleaned_text,
@@ -905,13 +959,18 @@ class OpenCodeACPClient:
             raise RuntimeError(f"OpenCode ACP process exited early: {stderr_text}")
         raise TimeoutError(f"Timed out waiting for OpenCode ACP response to {method}.")
 
-    def _run_prompt(self, prompt_text: str, *, timeout_seconds: float) -> tuple[str, str]:
-        """Send a prompt and collect the response.  Process persists across calls."""
+    def _run_prompt(self, prompt_text: str, *, timeout_seconds: float) -> tuple[str, str, dict[str, int] | None]:
+        """Send a prompt and collect the response.  Process persists across calls.
+
+        Returns (text, reasoning, usage) where usage is the real token usage
+        the ACP server reported in the session/prompt result (None when the
+        server did not include it).
+        """
         self._ensure_process(timeout_seconds=timeout_seconds)
         try:
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
-            self._send_request(
+            result = self._send_request(
                 "session/prompt",
                 {
                     "sessionId": self._session_id,
@@ -925,8 +984,9 @@ class OpenCodeACPClient:
                 timeout_seconds=timeout_seconds,
                 text_parts=text_parts,
                 reasoning_parts=reasoning_parts,
-            )
-            return "".join(text_parts), "".join(reasoning_parts)
+            ) or {}
+            usage = _parse_acp_usage(result.get("usage"))
+            return "".join(text_parts), "".join(reasoning_parts), usage
         except Exception:
             # On any error, mark stale so next call respawns.
             self._initialized = False

@@ -6,6 +6,7 @@ from opencode_acp_client import (
     _format_incremental_prompt,
     _format_messages_as_prompt,
     _estimate_tokens,
+    _parse_acp_usage,
     OpenCodeACPClient,
 )
 
@@ -96,10 +97,43 @@ def test_token_estimation():
     print(f"PASS: token estimation EN={tokens} CJK={cjk_tokens}")
 
 
+def test_parse_acp_usage_real_shape():
+    # The shape opencode acp (>=1.18.20) actually returns in the
+    # session/prompt result — verified live with a real ACP session.
+    raw = {
+        "inputTokens": 51562,
+        "outputTokens": 27,
+        "totalTokens": 52613,
+        "cachedReadTokens": 1024,
+    }
+    parsed = _parse_acp_usage(raw)
+    assert parsed is not None
+    assert parsed["prompt_tokens"] == 51562
+    assert parsed["completion_tokens"] == 27
+    assert parsed["cached_tokens"] == 1024
+    # input + output + cached = the server's totalTokens (opencode's shape)
+    assert parsed["prompt_tokens"] + parsed["completion_tokens"] + parsed["cached_tokens"] == parsed["total_tokens"] or parsed["total_tokens"] == 52613
+    print(f"PASS: parse ACP usage real shape → {parsed}")
+
+
+def test_parse_acp_usage_missing_or_zero():
+    assert _parse_acp_usage(None) is None
+    assert _parse_acp_usage({}) is None
+    assert _parse_acp_usage({"inputTokens": 0, "outputTokens": 0}) is None
+    # Missing totalTokens → computed as input + output
+    parsed = _parse_acp_usage({"inputTokens": 100, "outputTokens": 5})
+    assert parsed["total_tokens"] == 105
+    # Non-dict (e.g. a bare string from an odd server) → None
+    assert _parse_acp_usage("oops") is None
+    print("PASS: parse ACP usage missing/zero/non-dict → None fallback")
+
+
 test_incremental_includes_system_context()
 test_incremental_without_tools()
 test_incremental_empty_messages()
 test_incremental_tool_roundtrip_tail()
 test_full_prompt_unchanged_shape()
 test_token_estimation()
+test_parse_acp_usage_real_shape()
+test_parse_acp_usage_missing_or_zero()
 print("\nAll tests passed!")
