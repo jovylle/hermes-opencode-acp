@@ -21,6 +21,21 @@ Connects Hermes to OpenCode via JSON-RPC over stdio. OpenCode handles model sele
 > patch set gets absorbed into core and can be deleted — config stays
 > compatible. See [UPSTREAM.md](./UPSTREAM.md) for the migration checklist.
 
+## News
+
+**2026-09-22 — OpenCode's free tier now only works from inside OpenCode.**
+Direct HTTP calls to the Zen free tier are rejected server-side (verified
+live: `FreeTierError: OpenCode's free tier can only be used from within
+OpenCode`). That breaks Hermes's built-in `opencode-free` provider and any
+direct-HTTP free-model plugin despite being recently added features. This
+project is unaffected: Hermes drives a real `opencode acp` subprocess, so
+free models keep flowing through the ACP session.
+
+**2026-09-22 — v1.2.0 drops the Hermes-core patch.** The plugin now
+supplies its own ACP client via the `create_client` provider seam (same as
+Hermes's built-in `copilot-acp`). Install is user-dir only and survives
+`hermes update`.
+
 ## Features
 
 - **200+ models** — access OpenCode's full catalog (Anthropic, OpenAI, Google, DeepSeek, etc.) without managing API keys individually

@@ -101,6 +101,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
 <nav>
   <div class="brand"><span class="dot">●</span> hermes-opencode-acp</div>
   <div class="navlinks">
+    <a href="#news">News</a>
     <a href="#features">Features</a>
     <a href="#quickstart">Quick start</a>
     <a href="#upstream">Upstream</a>
@@ -138,6 +139,14 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
     </div>
   </div>
 </header>
+
+<section id="news">
+  <div class="wrap">
+    <div class="kicker">news · 2026-09-22</div>
+    <h2>OpenCode's free tier now only works from inside OpenCode</h2>
+    <p class="sec-sub">Direct HTTP calls to the Zen free tier are rejected server-side — verified live: <span class="mono">FreeTierError: OpenCode's free tier can only be used from within OpenCode</span>. That kills Hermes's built-in <span class="mono">opencode-free</span> path and any direct-HTTP free-model plugin. This project keeps working because it runs <em>inside</em> OpenCode: Hermes drives a real <span class="mono">opencode acp</span> subprocess, so free models keep flowing. Same week: <b>v1.2.0</b> drops the Hermes-core patch entirely — user-dir plugin install, survives <span class="mono">hermes update</span>.</p>
+  </div>
+</section>
 
 <section id="features">
   <div class="wrap">
