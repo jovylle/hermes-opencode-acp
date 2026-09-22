@@ -5,7 +5,7 @@ description: OpenCode ACP provider for Hermes Agent — use OpenCode as a coding
 ![Screenshot](./public/images/image.png)
 # hermes-opencode-acp
 
-**🌐 Landing page: [hermes-opencode-acp.uft1.com](https://hermes-opencode-acp.uft1.com)** — static, hosted on Cloudflare Pages (free). Updates when `site/index.html` changes: `npx wrangler pages deploy site --project-name hermes-opencode-acp`.
+**🌐 Landing page: [hermes-opencode-acp.uft1.com](https://hermes-opencode-acp.uft1.com)** — static, hosted on Cloudflare Pages (free). Updates when `site/index.html` changes: `wrangler pages deploy site --project-name hermes-opencode-acp`.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -13,13 +13,15 @@ Use [OpenCode](https://opencode.ai) as a coding agent backend for [Hermes Agent]
 
 Connects Hermes to OpenCode via JSON-RPC over stdio. OpenCode handles model selection, tool use, and plugin fallbacks — Hermes drives the ACP wire.
 
-> **⚠️ Early / Experimental** — This is early-stage code and may have bugs. Tested with Hermes Agent on macOS; other platforms or Hermes versions may behave differently. If something breaks, please open an issue. Contributions welcome.
+> **✅ Stable / daily driver** — In active daily use on Hermes Agent (macOS,
+> Hermes 0.21.x, opencode 1.18.x). If something breaks, please open an issue.
+> Contributions welcome.
 
 > **👀 Upstream watch** — Hermes Agent core is planning its own generalized
 > ACP client (NousResearch/hermes-agent#5257, OpenCode already on their
 > 14-agent list). We are closely tracking it: when it lands, this repo's
-> patch set gets absorbed into core and can be deleted — config stays
-> compatible. See [UPSTREAM.md](./UPSTREAM.md) for the migration checklist.
+> client can retire in favor of core and config stays compatible. See
+> [UPSTREAM.md](./UPSTREAM.md) for the migration checklist.
 
 ## News
 
@@ -106,14 +108,14 @@ cd hermes-opencode-acp
 Skip if already installed (check `ls ~/.hermes/plugins/model-providers/opencode-acp/__init__.py`).
 
 ```bash
-REPO=/Volumes/DevSSD/fore/lab/hermes-opencode-acp  # adjust if cloned elsewhere
+REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
 "$REPO/install-plugin.sh"
 ```
 
 The script installs the provider plugin to
 `~/.hermes/plugins/model-providers/opencode-acp/` — this lives OUTSIDE the
 Hermes git checkout, so `hermes update` never touches or stashes it.
-No Hermes-core patch is needed: since v1.1.0 the plugin supplies its own
+No Hermes-core patch is needed: since v1.2.0 the plugin supplies its own
 ACP client through the `create_client` provider seam (same mechanism as
 Hermes's built-in `copilot-acp`).
 
@@ -191,11 +193,10 @@ fallback_providers:
 > `session/set_config_option` (verified live on opencode 1.18.20: the session
 > recalls earlier context after the switch).  No fresh process, no history loss.
 
-> **Model picking is ACP-native.**  `/model` and `hermes model` now probe the
+> **Model picking is ACP-native.**  `/model` and `hermes model` probe the
 > `opencode acp` server itself for its advertised model catalog (the same list
-> it validates `session/set_config_option` against) instead of the GitHub
-> Copilot catalog.  `opencode models` CLI remains the fallback, then the static
-> list.
+> it validates `session/set_config_option` against) instead of a static list.
+> `opencode models` CLI remains the fallback.
 
 ## Architecture
 
@@ -228,7 +229,7 @@ API, re-run the installer and validator to pick up the bundled fix:
 ```bash
 hermes update
 
-/Volumes/DevSSD/fore/lab/hermes-opencode-acp/install-plugin.sh
+~/hermes-opencode-acp/install-plugin.sh
 hermes plugins validate ~/.hermes/plugins/model-providers/opencode-acp
 hermes chat -q "say ok" -Q --max-turns 1
 ```

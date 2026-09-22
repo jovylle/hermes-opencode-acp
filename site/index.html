@@ -170,7 +170,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
   <div class="wrap">
     <div class="kicker">get going</div>
     <h2>Quick start</h2>
-    <p class="sec-sub">Install OpenCode, copy the plugin into your Hermes checkout, apply the patch set, then pick a model.</p>
+    <p class="sec-sub">Install OpenCode, run the plugin installer, enable it, then pick a model. No Hermes-core patch — update-safe.</p>
     <div class="codebox">
       <div class="bar"><span class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></span><span>install + configure</span></div>
 <pre><span class="c-cm"># 1. OpenCode CLI + auth (skip if already installed)</span>
@@ -181,12 +181,10 @@ opencode auth login
 git clone https://github.com/jovylle/hermes-opencode-acp.git
 cd hermes-opencode-acp
 
-<span class="c-cm"># 3. Copy plugin + apply patches (skip if already patched)</span>
-cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
-mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
-cp plugin/opencode_acp_provider.py ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
-cd ~/.hermes/hermes-agent
-git apply $(pwd)/../../hermes-opencode-acp/patches/*.patch
+<span class="c-cm"># 3. Install + enable the plugin (idempotent, update-safe)</span>
+./install-plugin.sh
+hermes plugins enable opencode-acp-provider
+hermes plugins validate ~/.hermes/plugins/model-providers/opencode-acp
 
 <span class="c-cm"># 4. Pick a model — shows the live OpenCode catalog</span>
 hermes model
@@ -231,7 +229,7 @@ hermes chat</pre>
     <p class="sec-sub">Hermes core is planning a generalized ACP client — and OpenCode is already on their list.</p>
     <div class="watch">
       <div class="title">▲ NousResearch/hermes-agent#5257 — "Generalized ACP client for multi-agent CLI orchestration"</div>
-      <p>Core proposes a generic <span class="mono">ACPClient</span> + registry of 14 agents (Claude Code, Codex, Gemini, Cursor, Copilot, <b>OpenCode</b>, Kimi, Qwen…). When it lands, this patch set gets absorbed upstream and config stays compatible — <span class="mono">provider: opencode-acp</span> keeps working as-is. The migration checklist lives in <a href="https://github.com/jovylle/hermes-opencode-acp/blob/main/UPSTREAM.md">UPSTREAM.md</a>.</p>
+      <p>Core proposes a generic <span class="mono">ACPClient</span> + registry of 14 agents (Claude Code, Codex, Gemini, Cursor, Copilot, <b>OpenCode</b>, Kimi, Qwen…). When it lands, this plugin's client retires in favor of core and config stays compatible — <span class="mono">provider: opencode-acp</span> keeps working as-is. The migration checklist lives in <a href="https://github.com/jovylle/hermes-opencode-acp/blob/main/UPSTREAM.md">UPSTREAM.md</a>.</p>
     </div>
   </div>
 </section>

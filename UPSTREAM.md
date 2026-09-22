@@ -39,10 +39,11 @@ OpenCode is already on their 14-agent list.
      client/provider files, and upstream handles the rest.
    - If no (e.g. `opencode` or `oc-acp`): one-line change in `config.yaml`
      plus any fallback-chain entries — no client changes needed.
-2. `git -C ~/.hermes/hermes-agent pull` — confirm the tree no longer needs
-   `patches/*.patch`; the 14 modified files should revert to clean upstream.
-3. Remove `agent/opencode_acp_client.py` and
-   `plugins/model-providers/opencode-acp/` from the live install.
+2. `git -C ~/.hermes/hermes-agent pull` — nothing of this project lives in
+   that tree anymore (v1.2.0+ is user-dir only), so updates are safe.
+3. Replace this repo's `plugin/opencode_acp_client.py` + `plugin/__init__.py`
+   with a thin profile pointing at upstream's client (or remove the plugin
+   dir entirely if upstream ships `opencode-acp` itself).
 4. Verify: `hermes chat` (model through OpenCode ACP) + `hermes model`
    (pick a model, switch live) — same smoke tests as the original rollout.
 5. Archive this repo (or repurpose as the migration guide); update this file
@@ -50,14 +51,15 @@ OpenCode is already on their 14-agent list.
 
 ## Maintenance context
 
+- v1.2.0 (2026-09) removed the core-patch flow entirely: the plugin now
+  supplies its own ACP client via the `create_client` provider seam (same
+  as Hermes's built-in `copilot-acp`). No files in `~/.hermes/hermes-agent`
+  are touched, so upstream drift can no longer break the install. The
+  history below is kept for context.
 - Patches were originally built against hermes-agent @ **222465d**; by the
   time they were re-verified the local tree had moved to **bdc5b1f74**
   (thousands of commits later) and patch 010 (models.py) had already needed
   context rescue once. Upstream moves fast (~125 merged PRs per release
-  window) — expect drift.
-- When regenerating patches after a change, tag/fork the exact hermes-agent
-  baseline you diffed against (`git diff -- <file>` from the patched tree),
-  and record that baseline commit in the commit message of the regeneration.
-- Live install = `~/.hermes/hermes-agent` (this repo's patches applied,
-  client + provider copied in), already in sync with the latest upstream
-  as of 2026-08.
+  window) — that drift is exactly why the patch flow was retired.
+- Live install = `~/.hermes/plugins/model-providers/opencode-acp/`
+  (user-dir plugin, updates never touch it), in sync with this repo.
