@@ -29,14 +29,23 @@ OpenCode handles model selection and plugin fallbacks — Hermes drives the ACP 
 ```bash
 REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
 
-# Copy plugin files into Hermes
-cp "$REPO/plugin/opencode_acp_client.py" ~/.hermes/hermes-agent/agent/
-mkdir -p ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp
-cp "$REPO/plugin/opencode_acp_provider.py" ~/.hermes/hermes-agent/plugins/model-providers/opencode-acp/__init__.py
+# Option A — installer script (idempotent, safe to re-run)
+"$REPO/install-hermes-core-patch.sh"
 
-# Apply patches (skip if already patched)
-cd ~/.hermes/hermes-agent
-git apply "$REPO/patches/"*.patch
+# Option B — manual (same thing the script does)
+mkdir -p ~/.hermes/plugins/model-providers
+rm -rf ~/.hermes/plugins/model-providers/opencode-acp
+cp -R "$REPO/plugin" ~/.hermes/plugins/model-providers/opencode-acp
+```
+
+No Hermes-core patch is needed: the plugin supplies its own ACP client
+through the `create_client` provider seam (same mechanism as Hermes's
+built-in `copilot-acp`), so `hermes update` can never break the install.
+Then enable it:
+
+```bash
+hermes plugins enable opencode-acp-provider
+hermes plugins validate ~/.hermes/plugins/model-providers/opencode-acp
 ```
 
 ## Configure

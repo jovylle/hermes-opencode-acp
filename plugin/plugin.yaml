@@ -1,5 +1,5 @@
 name: opencode-acp-provider
 kind: model-provider
-version: 1.1.0
+version: 1.2.0
 description: OpenCode via ACP subprocess (user plugin)
 author: jovylle

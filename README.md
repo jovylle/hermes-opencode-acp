@@ -95,12 +95,19 @@ REPO=/Volumes/DevSSD/fore/lab/hermes-opencode-acp  # adjust if cloned elsewhere
 "$REPO/install-hermes-core-patch.sh"
 ```
 
-The script does two things:
+The script installs the provider plugin to
+`~/.hermes/plugins/model-providers/opencode-acp/` — this lives OUTSIDE the
+Hermes git checkout, so `hermes update` never touches or stashes it.
+No Hermes-core patch is needed: since v1.1.0 the plugin supplies its own
+ACP client through the `create_client` provider seam (same mechanism as
+Hermes's built-in `copilot-acp`).
 
-1. **Installs the provider plugin** to `~/.hermes/plugins/model-providers/opencode-acp/` — this lives OUTSIDE the Hermes git checkout, so `hermes update` never touches or stashes it.
-2. **Applies the core-tree routing patch** (`patches/hermes-core-v<ver>.patch`) to `~/.hermes/hermes-agent` as *uncommitted* working-tree changes. Never commit them on `main`: the updater hard-resets a diverged main and would destroy committed work, while uncommitted changes ride its normal autostash flow.
+It is idempotent — safe to re-run any time. Then enable it:
 
-It is idempotent — safe to re-run any time.
+```bash
+hermes plugins enable opencode-acp-provider
+hermes plugins validate ~/.hermes/plugins/model-providers/opencode-acp
+```
 
 ### 5. Configure Hermes to use OpenCode ACP
 
