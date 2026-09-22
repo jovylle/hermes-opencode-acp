@@ -30,7 +30,7 @@ OpenCode handles model selection and plugin fallbacks — Hermes drives the ACP 
 REPO=~/hermes-opencode-acp  # adjust if cloned elsewhere
 
 # Option A — installer script (idempotent, safe to re-run)
-"$REPO/install-hermes-core-patch.sh"
+"$REPO/install-plugin.sh"
 
 # Option B — manual (same thing the script does)
 mkdir -p ~/.hermes/plugins/model-providers

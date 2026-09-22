@@ -92,7 +92,7 @@ Skip if already installed (check `ls ~/.hermes/plugins/model-providers/opencode-
 
 ```bash
 REPO=/Volumes/DevSSD/fore/lab/hermes-opencode-acp  # adjust if cloned elsewhere
-"$REPO/install-hermes-core-patch.sh"
+"$REPO/install-plugin.sh"
 ```
 
 The script installs the provider plugin to
@@ -205,51 +205,18 @@ Hermes ──ACP JSON-RPC──> OpenCode ──HTTP──> LLM Provider
 
 ## After a Hermes update
 
-`hermes update` is safe with this setup — but the core-tree patch must be
-re-applied afterwards, and if upstream changed nearby code, regenerated.
+Nothing to do. The plugin lives in `~/.hermes/plugins/` (outside the
+Hermes git checkout) and needs no core patch, so `hermes update` can
+never break the install. If a new Hermes version changes the provider
+API, re-run the installer and validator to pick up the bundled fix:
 
 ```bash
 hermes update
 
-# 1. Re-apply (no-op if the tree is already patched)
-/Volumes/DevSSD/fore/lab/hermes-opencode-acp/install-hermes-core-patch.sh
-
-# 2. Restart the gateway from a separate shell
-hermes gateway restart && hermes gateway status
-
-# 3. Verify the fallback provider resolves
+/Volumes/DevSSD/fore/lab/hermes-opencode-acp/install-plugin.sh
+hermes plugins validate ~/.hermes/plugins/model-providers/opencode-acp
 hermes chat -q "say ok" -Q --max-turns 1
 ```
-
-**If step 1 fails** ("error: patch does not apply" or conflict markers):
-upstream shipped changes that collide with the patch. Regenerate it:
-
-```bash
-cd ~/.hermes/hermes-agent
-git status --porcelain          # see which files have conflicts/dirty state
-git checkout -- .               # discard broken partial apply
-rm -f agent/opencode_acp_client.py
-```
-
-Then re-apply by hand onto the new version:
-
-```bash
-cd /Volumes/DevSSD/fore/lab/hermes-opencode-acp
-cp plugin/opencode_acp_client.py ~/.hermes/hermes-agent/agent/
-cd ~/.hermes/hermes-agent
-
-# re-do each routing edit from the old patch; the hunks that still apply:
-git apply --3way "$OLD_REPO/patches/hermes-core-v0.20.5.patch" || true
-
-# resolve conflicts in an editor (search for <<<<<<<), then regenerate:
-git diff > /Volumes/DevSSD/fore/lab/hermes-opencode-acp/patches/hermes-core-v<NEWVER>.patch
-git diff --cached >> /Volumes/DevSSD/fore/lab/hermes-opencode-acp/patches/hermes-core-v<NEWVER>.patch
-git reset -q                    # unstage everything — keep main's index clean
-```
-
-Delete stale `patches/hermes-core-v<oldver>.patch` once the new one verifies.
-The plugin dir (`~/.hermes/plugins/model-providers/opencode-acp/`) needs no
-attention on updates — updates never touch `$HERMES_HOME`.
 
 ## Troubleshooting
 
