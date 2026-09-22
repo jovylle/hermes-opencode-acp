@@ -383,6 +383,47 @@ def _render_message_content(content: Any) -> str:
     return str(content).strip()
 
 
+def _head_signature(messages: list[dict[str, Any]]) -> str:
+    """Short fingerprint of the conversation head for compaction detection.
+
+    Hermes auto-compact rewrites the head of ``messages`` (old turns replaced
+    by a summary). The OpenCode backend still holds the pre-compact history,
+    so any head rewrite means the backend must be reset or it keeps the full
+    context. Comparing the first two messages' role + content prefix is enough
+    to catch summary insertion, rewind, and new-conversation reuse.
+    """
+    bits: list[str] = []
+    for message in (messages or [])[:2]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "?").strip().lower()
+        content = _render_message_content(message.get("content"))[:200]
+        bits.append(f"{role}:{content}")
+    return "|".join(bits)
+
+
+_COMPACT_SUMMARY_MARKERS = (
+    "conversation summary",
+    "summary of the conversation",
+    "previous conversation",
+    "compacted",
+    "context summar",
+)
+
+
+def _looks_like_compacted_summary(messages: list[dict[str, Any]]) -> bool:
+    """Detect a Hermes-inserted compaction summary in the message head."""
+    for message in (messages or [])[:3]:
+        if not isinstance(message, dict):
+            continue
+        text = _render_message_content(message.get("content")).lower()
+        if not text:
+            continue
+        if any(marker in text for marker in _COMPACT_SUMMARY_MARKERS):
+            return True
+    return False
+
+
 def _build_openai_tool_call(
     *,
     call_id: str,
@@ -610,6 +651,12 @@ class OpenCodeACPClient:
         self._session_model: str | None = None
         # Model catalog the session advertises (configOptions model options).
         self._model_catalog: list[str] = []
+        # ── Hermes-side compaction tracking ──
+        # Hermes auto-compact rewrites messages[] (count shrinks, head becomes
+        # a summary) but the OpenCode backend keeps the full pre-compact
+        # history. Without a reset the backend never actually compacts.
+        self._last_msg_count: int | None = None
+        self._last_head_sig: str | None = None
 
     def close(self) -> None:
         proc: subprocess.Popen[str] | None
@@ -619,7 +666,39 @@ class OpenCodeACPClient:
             self._session_id = None
             self._initialized = False
             self._session_model = None
+            self._last_msg_count = None
+            self._last_head_sig = None
         self.is_closed = True
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _reset_backend_for_compaction(self) -> None:
+        """Kill the ACP process so the next prompt starts a fresh session.
+
+        Keeps ``is_closed`` False so the module-level cache keeps returning
+        this client object. The next ``_run_prompt`` → ``_ensure_process``
+        spawns a new process + ``session/new`` and the caller sends the FULL
+        compacted transcript as a cold start — that is what makes the backend
+        actually forget the pre-compact history.
+        """
+        proc: subprocess.Popen[str] | None
+        with self._proc_lock:
+            proc = self._proc
+            self._proc = None
+            self._session_id = None
+            self._initialized = False
+            self._session_model = None
+            # NOTE: _last_msg_count / _last_head_sig are refreshed by the
+            # caller after the reset so the compacted transcript becomes the
+            # new baseline — do not clear them here.
         if proc is None:
             return
         try:
@@ -642,9 +721,39 @@ class OpenCodeACPClient:
         stream: bool = False,
         **_: Any,
     ) -> Any:
+        # ── Hermes-side compaction detection ──
+        # Hermes auto-compact rewrites messages[] (count shrinks, head becomes
+        # a summary) but a persistent OpenCode session keeps the FULL
+        # pre-compact history. Detect the rewrite and reset the backend so the
+        # compacted transcript becomes a fresh cold-start session.
+        current_count = len(messages or [])
+        current_head = _head_signature(messages or [])
+        compacted = False
+        if self._initialized and self._session_id:
+            if self._last_msg_count is not None:
+                # Shrink by 4+ messages, or below 70% of the previous length.
+                if current_count <= self._last_msg_count - 4 or (
+                    self._last_msg_count > 10
+                    and current_count < int(self._last_msg_count * 0.7)
+                ):
+                    compacted = True
+                # Same length but head rewritten (rewind / summary swap).
+                elif (
+                    self._last_head_sig is not None
+                    and current_head
+                    and current_head != self._last_head_sig
+                    and current_count <= self._last_msg_count
+                ):
+                    compacted = True
+            if not compacted and _looks_like_compacted_summary(messages or []):
+                # Fresh summary marker Hermes inserted — backend has never
+                # seen it as a head rewrite target.
+                compacted = True
+            if compacted:
+                self._reset_backend_for_compaction()
         # For persistent sessions (process already alive), send ONLY the
         # latest user message — OpenCode's session context has the rest.
-        # For cold starts, send the full transcript (includes system prompt).
+        # For cold starts (or just-compacted resets), send the full transcript.
         if self._initialized and self._session_id:
             incremental = _format_incremental_prompt(
                 messages or [],
@@ -753,6 +862,11 @@ class OpenCodeACPClient:
             usage=usage,
             model=model or "opencode-acp",
         )
+        # New baseline: the backend now holds everything Hermes just sent
+        # (full transcript on cold-start / post-compact reset, incremental tail
+        # otherwise). Next turn's shrink/head-rewrite check compares against this.
+        self._last_msg_count = current_count
+        self._last_head_sig = current_head or None
         if stream:
             return _completion_to_stream_chunks(completion)
         return completion
